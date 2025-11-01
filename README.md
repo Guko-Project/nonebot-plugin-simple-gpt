@@ -1,126 +1,65 @@
-<div align="center">
-  <a href="https://v2.nonebot.dev/store"><img src="https://github.com/A-kirami/nonebot-plugin-template/blob/resources/nbp_logo.png" width="180" height="180" alt="NoneBotPluginLogo"></a>
-  <br>
-  <p><img src="https://github.com/A-kirami/nonebot-plugin-template/blob/resources/NoneBotPlugin.svg" width="240" alt="NoneBotPluginText"></p>
-</div>
+# nonebot-plugin-simple-gpt
 
-<div align="center">
+基于大模型的 NoneBot2 群聊对话插件，支持在群聊中通过艾特机器人或随机触发的方式获得自然语言回复，全部回复默认使用中文。
 
-# nonebot-plugin-template
+## ✨ 功能
+- 艾特机器人时，会读取该消息之前的连续 20 条群聊记录，与预设 Prompt 拼接后调用 OpenAI Chat Completions 接口生成回复。
+- 支持为每个群聊维护独立的上下文，不在群聊之间共享历史消息。
+- 可配置随机回复概率，在未被艾特的情况下也能偶尔插入互动。
+- 所有关键行为（Prompt 模板、模型、温度、超时、兜底回复等）都可以通过 `.env` 配置。
 
-_✨ NoneBot 插件简单描述 ✨_
+## 📦 安装
 
+项目基于 [uv](https://github.com/astral-sh/uv) 管理依赖。进入 NoneBot2 项目根目录后：
 
-<a href="./LICENSE">
-    <img src="https://img.shields.io/github/license/owner/nonebot-plugin-template.svg" alt="license">
-</a>
-<a href="https://pypi.python.org/pypi/nonebot-plugin-template">
-    <img src="https://img.shields.io/pypi/v/nonebot-plugin-template.svg" alt="pypi">
-</a>
-<img src="https://img.shields.io/badge/python-3.9+-blue.svg" alt="python">
+```bash
+uv add nonebot-plugin-simple-gpt
+```
 
-</div>
+或在本地开发阶段将本插件复制到 `src/plugins/` 目录即可。
 
-这是一个 nonebot2 插件项目的模板库, 你可以直接使用本模板创建你的 nonebot2 插件项目的仓库
+在 `pyproject.toml` 中启用插件：
 
-<details open>
-<summary>模板库使用方法</summary>
-
-1. 点击 [![start-course](https://user-images.githubusercontent.com/1221423/235727646-4a590299-ffe5-480d-8cd5-8194ea184546.svg)](https://github.com/new?template_owner=A-kirami&template_name=nonebot-plugin-template&owner=%40me&name=nonebot-plugin-&visibility=public) 创建仓库
-2. 在创建好的新仓库中, 在 "Add file" 菜单中选择 "Create new file", 在新文件名处输入`LICENSE`, 此时在右侧会出现一个 "Choose a license template" 按钮, 点击此按钮选择开源协议模板, 然后在最下方提交新文件到主分支
-3. 全局替换`owner`为仓库所有者ID; 全局替换`nonebot-plugin-template`为插件名; 全局替换`nonebot_plugin_template`为包名; 修改 python 徽标中的版本为你插件的运行所需版本
-4. 修改 README 中的插件名和插件描述, 并在下方填充相应的内容
-
-</details>
-
-> [!NOTE]
-> 模板库中自带了一个发布工作流, 你可以使用此工作流自动发布你的插件到 pypi
-
-<details>
-<summary>配置发布工作流</summary>
-
-1. 前往 https://pypi.org/manage/account/#api-tokens 并创建一个新的 API 令牌。创建成功后不要关闭页面，不然你将无法再次查看此令牌。
-2. 在单独的浏览器选项卡或窗口中，打开 [Actions secrets and variables](./settings/secrets/actions) 页面。你也可以在 Settings - Secrets and variables - Actions 中找到此页面。
-3. 点击 New repository secret 按钮，创建一个名为 `PYPI_API_TOKEN` 的新令牌，并从第一步复制粘贴令牌。
-
-</details>
-
-> [!IMPORTANT]
-> 这个发布工作流需要 pyproject.toml 文件, 并且只支持 [PEP 621](https://peps.python.org/pep-0621/) 标准的 pyproject.toml 文件
-
-<details>
-<summary>触发发布工作流</summary>
-从本地推送任意 tag 即可触发。
-
-创建 tag:
-
-    git tag <tag_name>
-
-推送本地所有 tag:
-
-    git push origin --tags
-
-</details>
-
-## 📖 介绍
-
-这里是插件的详细介绍部分
-
-## 💿 安装
-
-<details open>
-<summary>使用 nb-cli 安装</summary>
-在 nonebot2 项目的根目录下打开命令行, 输入以下指令即可安装
-
-    nb plugin install nonebot-plugin-template
-
-</details>
-
-<details>
-<summary>使用包管理器安装</summary>
-在 nonebot2 项目的插件目录下, 打开命令行, 根据你使用的包管理器, 输入相应的安装命令
-
-<details>
-<summary>pip</summary>
-
-    pip install nonebot-plugin-template
-</details>
-<details>
-<summary>pdm</summary>
-
-    pdm add nonebot-plugin-template
-</details>
-<details>
-<summary>poetry</summary>
-
-    poetry add nonebot-plugin-template
-</details>
-<details>
-<summary>conda</summary>
-
-    conda install nonebot-plugin-template
-</details>
-
-打开 nonebot2 项目根目录下的 `pyproject.toml` 文件, 在 `[tool.nonebot]` 部分追加写入
-
-    plugins = ["nonebot_plugin_template"]
-
-</details>
+```toml
+[tool.nonebot]
+plugins = ["nonebot_plugin_simple_gpt"]
+```
 
 ## ⚙️ 配置
 
-在 nonebot2 项目的`.env`文件中添加下表中的必填配置
+在 NoneBot2 项目的 `.env` 或 `.env.prod` 文件中新增以下配置项：
 
-| 配置项 | 必填 | 默认值 | 说明 |
-|:-----:|:----:|:----:|:----:|
-| 配置项1 | 是 | 无 | 配置说明 |
-| 配置项2 | 否 | 无 | 配置说明 |
+| 变量名 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `SIMPLE_GPT_API_KEY` | 是 | 无 | OpenAI 风格接口的 API Key |
+| `SIMPLE_GPT_MODEL` | 否 | `gpt-4o-mini` | Chat Completions 模型名称 |
+| `SIMPLE_GPT_API_BASE` | 否 | `https://api.openai.com/v1` | 接口基础地址，兼容自建或代理服务 |
+| `SIMPLE_GPT_PROMPT_TEMPLATE` | 否 | 见下文 | Prompt 模板，支持 `{history}`、`{sender}`、`{latest_message}` 占位符 |
+| `SIMPLE_GPT_HISTORY_LIMIT` | 否 | `20` | 参与上下文的历史消息条数上限（最多 50） |
+| `SIMPLE_GPT_TEMPERATURE` | 否 | `0.7` | 生成温度 |
+| `SIMPLE_GPT_MAX_TOKENS` | 否 | `512` | 最大生成 Token 数 |
+| `SIMPLE_GPT_TIMEOUT` | 否 | `15.0` | 请求超时时间（秒） |
+| `SIMPLE_GPT_REPLY_PROBABILITY` | 否 | `0.0` | 随机触发概率，设为 `0` 表示只在艾特时回复 |
+| `SIMPLE_GPT_FAILURE_REPLY` | 否 | `呜呜，暂时无法连接到大模型，请稍后再试呀。` | 调用失败时的兜底文本 |
 
-## 🎉 使用
-### 指令表
-| 指令 | 权限 | 需要@ | 范围 | 说明 |
-|:-----:|:----:|:----:|:----:|:----:|
-| 指令1 | 主人 | 否 | 私聊 | 指令说明 |
-| 指令2 | 群员 | 是 | 群聊 | 指令说明 |
-### 效果图
-如果有效果图的话
+默认 Prompt 模板：
+
+```text
+你是一个友善的中文群聊助手，需要结合最近的聊天记录进行自然对话。以下是群聊最近的消息：
+{history}
+请你用简体中文回复{sender}的最新发言：{latest_message}
+```
+
+## 🚀 使用
+
+- 在群聊中艾特机器人即可触发智能回复，回复内容会基于最近 20 条群聊消息生成。
+- 当 `SIMPLE_GPT_REPLY_PROBABILITY` 大于 0 时，机器人也可能在未被艾特的状态下随机插话。
+- 如果未配置 `SIMPLE_GPT_API_KEY`，仅在被艾特时会返回兜底提示；随机回复会自动关闭。
+
+## 🛠️ 开发提示
+
+- 历史消息仅在内存中维护，不会写入持久化存储；重启后上下文自动清空。
+- 如果需要自定义接口（如兼容 Azure/OpenAI 兼容服务），请调整 `SIMPLE_GPT_API_BASE` 与模型参数。
+- 插件默认使用 OneBot v11 适配器的群聊事件，如需扩展到其他适配器，可在 `main.py` 中补充相应的事件类型判断。
+
+欢迎在实际场景中按照需求修改 Prompt 与随机回复策略！
