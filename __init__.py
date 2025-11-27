@@ -18,6 +18,7 @@ from nonebot.plugin import PluginMetadata
 from pydantic import BaseModel, Field, validator
 
 from .chat import close_chat_client, generate_chat_reply
+from .image_utils import extract_image_data_urls
 from .models import HistoryEntry
 from .plugin_system import (
     LLMRequestPayload,
@@ -196,6 +197,10 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
     else:
         plain_text = raw_text
 
+    image_contexts = await extract_image_data_urls(event.message)
+    if image_contexts:
+        plain_text = f"{plain_text}\n（附带 {len(image_contexts)} 张图片）"
+
     session_id = f"group_{event.group_id}"
     display_name = event.sender.card or event.sender.nickname or f"用户{user_id}"
 
@@ -227,6 +232,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             history=history_before,
             sender=display_name,
             latest_message=plain_text,
+            images=image_contexts,
         )
         llm_request = await emit_before_llm_request(llm_request)
         generated = await generate_chat_reply(
@@ -237,6 +243,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             temperature=plugin_config.simple_gpt_temperature,
             max_tokens=plugin_config.simple_gpt_max_tokens,
             timeout=plugin_config.simple_gpt_timeout,
+            images=llm_request.images,
         )
         reply_text = generated or plugin_config.simple_gpt_failure_reply
         response_payload = LLMResponsePayload(

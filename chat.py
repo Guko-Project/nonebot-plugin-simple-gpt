@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nonebot.log import logger
 from openai import AsyncOpenAI, OpenAIError
@@ -69,6 +69,7 @@ async def generate_chat_reply(
     temperature: float,
     max_tokens: int,
     timeout: float,
+    images: Optional[Sequence[str]] = None,
 ) -> Optional[str]:
     """Call OpenAI's chat completion API through the official SDK."""
     logger.info(f"simple-gpt: 生成聊天回复，prompt={prompt}")
@@ -79,14 +80,32 @@ async def generate_chat_reply(
 
     logger.info(
         f"simple-gpt: 准备调用 OpenAI，model={model}, base_url={base_url}, "
-        f"temperature={temperature}, max_tokens={max_tokens}"
+        f"temperature={temperature}, max_tokens={max_tokens}, images={len(images or [])}"
     )
 
+    content_parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    if images:
+        for data_url in images:
+            if not data_url:
+                continue
+            content_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                }
+            )
+    user_message_content: Any
+    if len(content_parts) == 1:
+        user_message_content = prompt
+    else:
+        user_message_content = content_parts
+
+    print(user_message_content)
     try:
         async with _request_lock:
             completion = await client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": user_message_content}],
                 temperature=temperature,
                 # 暂时不添加最大 token 数量
                 # max_tokens=max_tokens,
