@@ -3,22 +3,35 @@ from __future__ import annotations
 import asyncio
 import random
 from collections import deque
-from dataclasses import dataclass
 from typing import Deque, Dict, List, Optional
 
 from nonebot import get_driver, get_plugin_config, on_message
 from nonebot.adapters import Bot
-from nonebot.adapters.onebot.v11 import GroupMessageEvent, MessageEvent
+from nonebot.adapters.onebot.v11 import (
+    GroupMessageEvent,
+    MessageEvent,
+    MessageSegment,
+)
 from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.plugin import PluginMetadata
 from pydantic import BaseModel, Field, validator
 
 from .chat import close_chat_client, generate_chat_reply
+from .models import HistoryEntry
+from .plugin_system import (
+    LLMRequestPayload,
+    LLMResponsePayload,
+    emit_after_llm_response,
+    emit_before_llm_request,
+)
+from . import plugins as _simple_gpt_plugins  # noqa: F401
 
 
 class Config(BaseModel):
-    simple_gpt_api_key: str = Field("", description="OpenAI API Key，留空则插件不会调用接口")
+    simple_gpt_api_key: str = Field(
+        "", description="OpenAI API Key，留空则插件不会调用接口"
+    )
     simple_gpt_model: str = Field(default="gpt-4o-mini", description="使用的模型名称")
     simple_gpt_api_base: str = Field(
         default="https://api.openai.com/v1", description="OpenAI 接口基础地址"
@@ -48,7 +61,9 @@ class Config(BaseModel):
         le=50,
         description="用于上下文拼接的历史消息条数上限",
     )
-    simple_gpt_timeout: float = Field(default=300.0, gt=0, description="请求超时时间（秒）")
+    simple_gpt_timeout: float = Field(
+        default=300.0, gt=0, description="请求超时时间（秒）"
+    )
     simple_gpt_temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="生成温度"
     )
@@ -85,9 +100,7 @@ class Config(BaseModel):
             try:
                 normalized.append(int(item))
             except (TypeError, ValueError):
-                logger.warning(
-                    "simple-gpt: 无法解析白名单条目 %r，已忽略", item
-                )
+                logger.warning("simple-gpt: 无法解析白名单条目 %r，已忽略", item)
         return normalized
 
 
@@ -100,13 +113,6 @@ __plugin_meta__ = PluginMetadata(
     usage="在群里@鸽子姬即可触发回复，或根据设定的概率自动回复。",
     config=Config,
 )
-
-
-@dataclass
-class HistoryEntry:
-    speaker: str
-    content: str
-    is_bot: bool = False
 
 
 class HistoryManager:
@@ -130,6 +136,7 @@ class HistoryManager:
 
 history_manager = HistoryManager(limit=plugin_config.simple_gpt_history_limit)
 driver = get_driver()
+
 
 @driver.on_shutdown
 async def _close_client() -> None:
@@ -195,8 +202,10 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
     history_before = history_manager.snapshot(session_id)
     is_tome_event = event.is_tome()
     reply_needed = should_reply(event)
-    if reply_needed and not is_tome_event and not _is_group_allowed_for_proactive(
-        event.group_id
+    if (
+        reply_needed
+        and not is_tome_event
+        and not _is_group_allowed_for_proactive(event.group_id)
     ):
         logger.debug(
             "simple-gpt: 群 %s 不在主动发言白名单，跳过主动回复", event.group_id
@@ -213,8 +222,15 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             sender=display_name,
             latest_message=plain_text,
         )
-        generated = await generate_chat_reply(
+        llm_request = LLMRequestPayload(
             prompt=prompt,
+            history=history_before,
+            sender=display_name,
+            latest_message=plain_text,
+        )
+        llm_request = await emit_before_llm_request(llm_request)
+        generated = await generate_chat_reply(
+            prompt=llm_request.prompt,
             api_key=plugin_config.simple_gpt_api_key,
             base_url=plugin_config.simple_gpt_api_base,
             model=plugin_config.simple_gpt_model,
@@ -223,10 +239,20 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             timeout=plugin_config.simple_gpt_timeout,
         )
         reply_text = generated or plugin_config.simple_gpt_failure_reply
+        response_payload = LLMResponsePayload(
+            content=reply_text,
+            request=llm_request,
+        )
+        response_payload = await emit_after_llm_response(response_payload)
+        reply_text = response_payload.content
         lines = [line.strip() for line in reply_text.splitlines() if line.strip()]
-        for line in lines:
+        for idx, line in enumerate(lines):
             await asyncio.sleep(random.uniform(1.0, 3.0))
-            await matcher.send(line)
+            if idx == 0:
+                message = MessageSegment.reply(event.message_id) + line
+            else:
+                message = line
+            await matcher.send(message)
 
     history_manager.append(
         session_id,

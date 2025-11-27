@@ -31,9 +31,7 @@ async def _get_client(
             try:
                 await _client.close()
             except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    f"simple-gpt: 关闭旧的 OpenAI 客户端时出错：{exc}"
-                )
+                logger.debug(f"simple-gpt: 关闭旧的 OpenAI 客户端时出错：{exc}")
 
         _client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
         _client_config = config
