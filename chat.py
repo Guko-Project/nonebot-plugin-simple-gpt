@@ -100,7 +100,6 @@ async def generate_chat_reply(
     else:
         user_message_content = content_parts
 
-    print(user_message_content)
     try:
         async with _request_lock:
             completion = await client.chat.completions.create(

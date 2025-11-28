@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 from collections import deque
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Sequence
 
 from nonebot import get_driver, get_plugin_config, on_message
 from nonebot.adapters import Bot
@@ -145,18 +145,34 @@ async def _close_client() -> None:
 
 
 def generate_prompt(
-    *, history: List[HistoryEntry], sender: str, latest_message: str
+    *,
+    history: List[HistoryEntry],
+    sender: str,
+    latest_message: str,
+    latest_images: Optional[Sequence[str]] = None,
 ) -> str:
     if history:
-        history_lines = "\n".join(
-            f"{entry.speaker}：{entry.content}" for entry in history
-        )
+        history_lines = "\n".join(_format_history_entry(entry) for entry in history)
     else:
         history_lines = "（暂无聊天记录）"
+    latest_section = latest_message
+    if latest_images:
+        latest_section = _append_image_hint(latest_section, len(latest_images))
     prompt = plugin_config.simple_gpt_prompt_template.format(
-        history=history_lines, sender=sender, latest_message=latest_message
+        history=history_lines, sender=sender, latest_message=latest_section
     )
     return prompt
+
+
+def _format_history_entry(entry: HistoryEntry) -> str:
+    content = entry.content
+    if entry.images:
+        content = _append_image_hint(content, len(entry.images))
+    return f"{entry.speaker}：{content}"
+
+
+def _append_image_hint(content: str, count: int) -> str:
+    return f"{content}\n（附带 {count} 张图片）"
 
 
 def should_reply(event: MessageEvent) -> bool:
@@ -198,8 +214,6 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
         plain_text = raw_text
 
     image_contexts = await extract_image_data_urls(event.message)
-    if image_contexts:
-        plain_text = f"{plain_text}\n（附带 {len(image_contexts)} 张图片）"
 
     session_id = f"group_{event.group_id}"
     display_name = event.sender.card or event.sender.nickname or f"用户{user_id}"
@@ -226,13 +240,18 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             history=history_before,
             sender=display_name,
             latest_message=plain_text,
+            latest_images=image_contexts,
         )
+        history_images: List[str] = [
+            image for entry in history_before for image in entry.images
+        ]
+        combined_images = [*history_images, *image_contexts]
         llm_request = LLMRequestPayload(
             prompt=prompt,
             history=history_before,
             sender=display_name,
             latest_message=plain_text,
-            images=image_contexts,
+            images=combined_images,
         )
         llm_request = await emit_before_llm_request(llm_request)
         generated = await generate_chat_reply(
@@ -263,11 +282,16 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
 
     history_manager.append(
         session_id,
-        HistoryEntry(speaker=display_name, content=plain_text, is_bot=False),
+        HistoryEntry(
+            speaker=display_name,
+            content=plain_text,
+            is_bot=False,
+            images=image_contexts,
+        ),
     )
 
     if reply_needed and reply_text:
         history_manager.append(
             session_id,
-            HistoryEntry(speaker="鸽子姬", content=reply_text, is_bot=True),
+            HistoryEntry(speaker="鸽子姬", content=reply_text, is_bot=True, images=[]),
         )

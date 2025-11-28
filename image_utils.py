@@ -34,11 +34,8 @@ async def _segment_to_data_url(segment: MessageSegment) -> Optional[str]:
     url = data.get("url")
     file_value = data.get("file")
     path_value = data.get("path")
-
     content: Optional[bytes] = None
-    content_type: Optional[str] = None
     filename: Optional[str] = None
-
     if file_value:
         filename = file_value
         if file_value.startswith("base64://"):
@@ -53,7 +50,7 @@ async def _segment_to_data_url(segment: MessageSegment) -> Optional[str]:
         content = await _load_local_file(path_value)
 
     if content is None and url:
-        content, content_type = await _download_image(url)
+        content, _ = await _download_image(url)
 
     if content is None:
         logger.debug(
@@ -62,6 +59,7 @@ async def _segment_to_data_url(segment: MessageSegment) -> Optional[str]:
         )
         return None
 
+    content_type = _resolve_mime(content, content_type=None, filename=None)
     data_url = _build_data_url(content, content_type=content_type, filename=filename)
     return data_url
 
