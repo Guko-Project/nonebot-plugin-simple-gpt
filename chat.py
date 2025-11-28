@@ -72,7 +72,7 @@ async def generate_chat_reply(
     images: Optional[Sequence[str]] = None,
 ) -> Optional[str]:
     """Call OpenAI's chat completion API through the official SDK."""
-    logger.info(f"simple-gpt: 生成聊天回复，prompt={prompt}")
+    # logger.info(f"simple-gpt: 生成聊天回复，prompt={prompt}")
     client = await _get_client(api_key=api_key, base_url=base_url, timeout=timeout)
     if client is None:
         logger.warning("simple-gpt: 未配置 API Key，跳过调用。")
