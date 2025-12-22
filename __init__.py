@@ -186,6 +186,8 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             images=combined_images,
         )
         llm_request = await emit_before_llm_request(llm_request)
+        # 被 @ 时提高重试次数，主动发言保持默认重试次数
+        max_retries = 5 if is_tome_event else 3
         generated = await generate_chat_reply(
             prompt=llm_request.prompt,
             api_key=plugin_config.simple_gpt_api_key,
@@ -196,6 +198,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             timeout=plugin_config.simple_gpt_timeout,
             images=llm_request.images,
             debug=plugin_config.simple_gpt_prompt_debug,
+            max_retries=max_retries,
         )
         # 主动发言时，如果服务器错误则不回复
         if not generated and not is_tome_event:
