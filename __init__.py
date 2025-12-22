@@ -264,21 +264,28 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             timeout=plugin_config.simple_gpt_timeout,
             images=llm_request.images,
         )
-        reply_text = generated or plugin_config.simple_gpt_failure_reply
-        response_payload = LLMResponsePayload(
-            content=reply_text,
-            request=llm_request,
-        )
-        response_payload = await emit_after_llm_response(response_payload)
-        reply_text = response_payload.content
-        lines = [line.strip() for line in reply_text.split("///") if line.strip()]
-        for idx, line in enumerate(lines):
-            await asyncio.sleep(random.uniform(1.0, 3.0))
-            if idx == 0:
-                message = MessageSegment.reply(event.message_id) + line
-            else:
-                message = line
-            await matcher.send(message)
+        # 主动发言时，如果服务器错误则不回复
+        if not generated and not is_tome_event:
+            logger.error(
+                "simple-gpt: 主动发言时，服务器返回错误，忽略该次主动发言"
+            )
+            reply_needed = False
+        else:
+            reply_text = generated or plugin_config.simple_gpt_failure_reply
+            response_payload = LLMResponsePayload(
+                content=reply_text,
+                request=llm_request,
+            )
+            response_payload = await emit_after_llm_response(response_payload)
+            reply_text = response_payload.content
+            lines = [line.strip() for line in reply_text.split("///") if line.strip()]
+            for idx, line in enumerate(lines):
+                await asyncio.sleep(random.uniform(1.0, 3.0))
+                if idx == 0:
+                    message = MessageSegment.reply(event.message_id) + line
+                else:
+                    message = line
+                await matcher.send(message)
 
     history_manager.append(
         session_id,
