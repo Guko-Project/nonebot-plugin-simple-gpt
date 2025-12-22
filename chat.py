@@ -71,6 +71,7 @@ async def generate_chat_reply(
     timeout: float,
     images: Optional[Sequence[str]] = None,
     debug: bool = False,
+    max_retries: int = 3,
 ) -> Optional[str]:
     """Call OpenAI's chat completion API through the official SDK."""
     # logger.info(f"simple-gpt: 生成聊天回复，prompt={prompt}")
@@ -113,33 +114,48 @@ async def generate_chat_reply(
     else:
         user_message_content = content_parts
 
-    try:
-        async with _request_lock:
-            completion = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": user_message_content}],
-                temperature=temperature,
-                # 暂时不添加最大 token 数量
-                # max_tokens=max_tokens,
-            )
-    except OpenAIError as exc:
-        logger.exception(f"simple-gpt: OpenAI 请求失败：{exc}")
-        return None
-    except Exception as exc:  # noqa: BLE001
-        logger.exception(f"simple-gpt: 调用 OpenAI SDK 时出错：{exc}")
-        return None
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with _request_lock:
+                completion = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": user_message_content}],
+                    temperature=temperature,
+                    # 暂时不添加最大 token 数量
+                    # max_tokens=max_tokens,
+                )
+        except OpenAIError as exc:
+            last_error = exc
+            logger.warning(f"simple-gpt: OpenAI 请求失败（第 {attempt}/{max_retries} 次）：{exc}")
+            if attempt < max_retries:
+                await asyncio.sleep(1.0 * attempt)
+                continue
+            logger.exception(f"simple-gpt: OpenAI 请求失败，已达到最大重试次数：{exc}")
+            return None
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning(f"simple-gpt: 调用 OpenAI SDK 时出错（第 {attempt}/{max_retries} 次）：{exc}")
+            if attempt < max_retries:
+                await asyncio.sleep(1.0 * attempt)
+                continue
+            logger.exception(f"simple-gpt: 调用 OpenAI SDK 时出错，已达到最大重试次数：{exc}")
+            return None
 
-    if not completion.choices:
-        logger.warning(f"simple-gpt: OpenAI 响应未包含 choices：{completion}")
-        return None
+        if not completion.choices:
+            logger.warning(f"simple-gpt: OpenAI 响应未包含 choices：{completion}")
+            return None
 
-    message = completion.choices[0].message
-    content = _extract_text_content(message)
-    if not content:
-        logger.warning(f"simple-gpt: OpenAI 响应未包含文本内容：{completion}")
-        return None
+        message = completion.choices[0].message
+        content = _extract_text_content(message)
+        if not content:
+            logger.warning(f"simple-gpt: OpenAI 响应未包含文本内容：{completion}")
+            return None
 
-    return content
+        logger.info(f"simple-gpt: 成功获取回复（第 {attempt} 次尝试）")
+        return content
+
+    return None
 
 
 async def close_chat_client() -> None:
