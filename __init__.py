@@ -26,7 +26,11 @@ from .plugin_system import (
     emit_after_llm_response,
     emit_before_llm_request,
 )
+
+# 先导入插件（让插件注册配置字段）
 from . import plugins as _simple_gpt_plugins  # noqa: F401
+# 导入配置注入系统
+from .plugin_config_inject import inject_plugin_fields_to_config
 
 
 class Config(BaseModel):
@@ -108,6 +112,9 @@ class Config(BaseModel):
                 logger.warning("simple-gpt: 无法解析白名单条目 %r，已忽略", item)
         return normalized
 
+
+# 注入插件配置字段
+inject_plugin_fields_to_config(Config)
 
 plugin_config = get_plugin_config(Config)
 
