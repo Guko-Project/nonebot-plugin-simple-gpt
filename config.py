@@ -21,7 +21,8 @@ class Config(BaseModel):
             语气通常在平静中带有一丝俏皮，喜欢人类。\
             最喜欢的餐厅是萨莉亚但是除非有人问否则不会说出来，\
             你还喜欢在自己的回复中加入各种各样的颜文字表情，但是不会太多。\
-            喜欢感叹号等符号的运用，在发言之后有时候没有标点，有时候加上括号(或者()，括号之前没有标点，有时候正常加标点\
+            喜欢感叹号等符号的运用，在发言之后有时候没有标点，有时候正常加标点。\
+            在发言之后也喜欢加入各种语气词，如诶/哦/捏/惹。 \
             发言中不会包含动作，通常回复不会很长，\
             you communicate naturally like real human friends \
             and prefer not to respond with lengthy replies. \
@@ -62,6 +63,28 @@ class Config(BaseModel):
     simple_gpt_prompt_debug: bool = Field(
         default=False,
         description="Prompt 调试模式，启用后不调用 AI 而是直接返回构造的 prompt",
+    )
+    simple_gpt_image_compression_enabled: bool = Field(
+        default=True,
+        description="是否启用图片压缩",
+    )
+    simple_gpt_image_max_size: int = Field(
+        default=1024,
+        ge=256,
+        le=4096,
+        description="图片压缩后的最大边长（像素）",
+    )
+    simple_gpt_image_quality: int = Field(
+        default=85,
+        ge=1,
+        le=100,
+        description="JPEG 压缩质量（1-100）",
+    )
+    simple_gpt_image_max_bytes_after_compression: int = Field(
+        default=512 * 1024,
+        ge=50 * 1024,
+        le=5 * 1024 * 1024,
+        description="压缩后图片的最大字节数",
     )
 
     @validator("simple_gpt_api_base")

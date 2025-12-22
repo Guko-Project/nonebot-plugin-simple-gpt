@@ -9,6 +9,7 @@ dependencies = [
     "nonebot2>=2.0.0",
     "httpx>=0.24.0",
     "openai",
+    "pillow>=10.4.0",
 ]
 requires-python = ">=3.8"
 readme = "README.md"

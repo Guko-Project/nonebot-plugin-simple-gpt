@@ -148,7 +148,7 @@ class WebSearchPlugin(SimpleGPTPlugin):
 
             # 从 history 和 extra 构造干净的上下文（不包含人设等系统提示）
             context = self._build_clean_context(payload.history, question, payload.extra)
-            logger.info(f"simple-gpt: 构建的上下文：{context}")
+
             # 判断是否需要搜索，并获取搜索查询
             search_decision = await self._check_search_needed(context, question)
 
