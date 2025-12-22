@@ -54,8 +54,7 @@ async def _segment_to_data_url(segment: MessageSegment) -> Optional[str]:
 
     if content is None:
         logger.debug(
-            "simple-gpt: 无法解析图片片段，data=%s",
-            data,
+            f"simple-gpt: 无法解析图片片段，data={data}"
         )
         return None
 
@@ -69,7 +68,7 @@ def _decode_inline_base64(value: str) -> Optional[bytes]:
     try:
         return base64.b64decode(payload)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("simple-gpt: 无法解码 base64 图片：%s", exc)
+        logger.warning(f"simple-gpt: 无法解码 base64 图片：{exc}")
         return None
 
 
@@ -92,10 +91,10 @@ async def _load_local_file(path_str: str) -> Optional[bytes]:
     try:
         data = await asyncio.to_thread(path.read_bytes)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("simple-gpt: 读取本地图片失败：%s", exc)
+        logger.warning(f"simple-gpt: 读取本地图片失败：{exc}")
         return None
     if len(data) > MAX_IMAGE_BYTES:
-        logger.warning("simple-gpt: 本地图片过大（%s bytes），已忽略", len(data))
+        logger.warning(f"simple-gpt: 本地图片过大（{len(data)} bytes），已忽略")
         return None
     return data
 
@@ -116,12 +115,12 @@ async def _download_image(url: str) -> Tuple[Optional[bytes], Optional[str]]:
             response = await client.get(url)
             response.raise_for_status()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("simple-gpt: 下载图片失败 %s：%s", url, exc)
+        logger.warning(f"simple-gpt: 下载图片失败 {url}：{exc}")
         return None, None
 
     data = response.content
     if len(data) > MAX_IMAGE_BYTES:
-        logger.warning("simple-gpt: 图片过大（%s bytes），已忽略", len(data))
+        logger.warning(f"simple-gpt: 图片过大（{len(data)} bytes），已忽略")
         return None, None
 
     content_type = response.headers.get("content-type")

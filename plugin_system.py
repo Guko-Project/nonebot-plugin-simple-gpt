@@ -65,7 +65,7 @@ class PluginManager:
             f"{plugin.__class__.__name__}(priority={priority})"
             for priority, plugin in self._plugins
         )
-        logger.info("simple-gpt: 插件加载顺序 -> %s", order)
+        logger.info(f"simple-gpt: 插件加载顺序 -> {order}")
 
     async def run_before_llm_request(
         self, payload: LLMRequestPayload

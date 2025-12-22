@@ -70,9 +70,22 @@ async def generate_chat_reply(
     max_tokens: int,
     timeout: float,
     images: Optional[Sequence[str]] = None,
+    debug: bool = False,
 ) -> Optional[str]:
     """Call OpenAI's chat completion API through the official SDK."""
     # logger.info(f"simple-gpt: 生成聊天回复，prompt={prompt}")
+
+    # Debug 模式：直接返回 prompt
+    if debug:
+        logger.info("simple-gpt: 处于 Prompt 调试模式，直接返回构造的 prompt")
+        debug_info = f"=== PROMPT DEBUG MODE ===\n\n{prompt}"
+        if images:
+            debug_info += f"\n\n=== IMAGES ({len(images)}) ==="
+            for idx, img_url in enumerate(images, 1):
+                preview = img_url[:100] + "..." if len(img_url) > 100 else img_url
+                debug_info += f"\n[{idx}] {preview}"
+        return debug_info
+
     client = await _get_client(api_key=api_key, base_url=base_url, timeout=timeout)
     if client is None:
         logger.warning("simple-gpt: 未配置 API Key，跳过调用。")

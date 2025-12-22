@@ -82,6 +82,10 @@ class Config(BaseModel):
         default_factory=list,
         description="允许主动发言的群聊 ID 列表，留空则禁用主动发言",
     )
+    simple_gpt_prompt_debug: bool = Field(
+        default=False,
+        description="Prompt 调试模式，启用后不调用 AI 而是直接返回构造的 prompt",
+    )
 
     @validator("simple_gpt_api_base")
     def _strip_api_base(cls, value: str) -> str:
@@ -227,7 +231,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
         and not _is_group_allowed_for_proactive(event.group_id)
     ):
         logger.debug(
-            "simple-gpt: 群 %s 不在主动发言白名单，跳过主动回复", event.group_id
+            f"simple-gpt: 群 {event.group_id} 不在主动发言白名单，跳过主动回复"
         )
         reply_needed = False
 
@@ -263,6 +267,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             max_tokens=plugin_config.simple_gpt_max_tokens,
             timeout=plugin_config.simple_gpt_timeout,
             images=llm_request.images,
+            debug=plugin_config.simple_gpt_prompt_debug,
         )
         # 主动发言时，如果服务器错误则不回复
         if not generated and not is_tome_event:
