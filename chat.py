@@ -129,7 +129,7 @@ async def generate_chat_reply(
             last_error = exc
             logger.warning(f"simple-gpt: OpenAI 请求失败（第 {attempt}/{max_retries} 次）：{exc}")
             if attempt < max_retries:
-                await asyncio.sleep(1.0 * attempt)
+                await asyncio.sleep(3.0 * attempt)
                 continue
             logger.exception(f"simple-gpt: OpenAI 请求失败，已达到最大重试次数：{exc}")
             return None
@@ -137,7 +137,7 @@ async def generate_chat_reply(
             last_error = exc
             logger.warning(f"simple-gpt: 调用 OpenAI SDK 时出错（第 {attempt}/{max_retries} 次）：{exc}")
             if attempt < max_retries:
-                await asyncio.sleep(1.0 * attempt)
+                await asyncio.sleep(3.0 * attempt)
                 continue
             logger.exception(f"simple-gpt: 调用 OpenAI SDK 时出错，已达到最大重试次数：{exc}")
             return None
