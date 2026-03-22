@@ -10,3 +10,4 @@ class HistoryEntry:
     content: str
     is_bot: bool = False
     images: List[str] = field(default_factory=list)
+    user_id: str = ""  # 平台用户 ID（如 QQ 号），bot 消息为空

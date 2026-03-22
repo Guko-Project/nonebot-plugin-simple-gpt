@@ -184,6 +184,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             sender=display_name,
             latest_message=plain_text,
             images=combined_images,
+            extra={"session_id": session_id, "sender_user_id": user_id},
         )
         llm_request = await emit_before_llm_request(llm_request)
         # 被 @ 时提高重试次数，主动发言保持默认重试次数
@@ -230,6 +231,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             content=plain_text,
             is_bot=False,
             images=image_contexts,
+            user_id=user_id,
         ),
     )
 

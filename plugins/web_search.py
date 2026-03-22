@@ -30,7 +30,7 @@ register_plugin_config_field(
 register_plugin_config_field(
     "simple_gpt_search_check_model",
     str,
-    default="gemini-2.5-flash-lite",
+    default="gemini-3.1-flash-lite-preview",
     description="用于判断是否需要搜索的模型",
 )
 register_plugin_config_field(
