@@ -76,24 +76,56 @@ async def _close_client() -> None:
     await close_chat_client()
 
 
+_PASSIVE_REPLY_SUFFIX = (
+    "以下是群聊最近的消息：\n{history}\n"
+    "请你用简体中文回复{sender}的最新发言：{latest_message}，"
+    "如果该发言中含有任务型的指令，则尽可能作为一个全能的智能助手完成它。\n"
+    "注意，需要按朋友聊天的形式将回复内容分句处理，通常 1-3 句，一句的概率最大，"
+    "在除了最后一句的句子末尾加上///作为分句符。"
+)
+
+_PROACTIVE_REPLY_SUFFIX = (
+    "以下是群聊最近的消息：\n{history}\n"
+    "你正在旁观群聊，觉得当前的话题很有意思，想要自然地插话参与讨论。"
+    "不要针对某个人回复，而是像朋友间聊天那样自然地加入话题，发表你的看法、吐槽或补充。\n"
+    "注意，需要按朋友聊天的形式将回复内容分句处理，通常 1-3 句，一句的概率最大，"
+    "在除了最后一句的句子末尾加上///作为分句符。"
+)
+
+
 def generate_prompt(
     *,
     history: List[HistoryEntry],
     sender: str,
     latest_message: str,
     latest_images: Optional[Sequence[str]] = None,
+    is_proactive: bool = False,
 ) -> str:
-    if history:
-        history_lines = "\n".join(_format_history_entry(entry) for entry in history)
+    if is_proactive:
+        # 主动回复：最新消息也放入 history 一起格式化
+        all_entries = [*history, HistoryEntry(
+            speaker=sender, content=latest_message, is_bot=False,
+            images=list(latest_images) if latest_images else [],
+        )]
+        if all_entries:
+            history_lines = "\n".join(_format_history_entry(e) for e in all_entries)
+        else:
+            history_lines = "（暂无聊天记录）"
+        character = plugin_config.simple_gpt_prompt_template
+        return character + "\n" + _PROACTIVE_REPLY_SUFFIX.format(history=history_lines)
     else:
-        history_lines = "（暂无聊天记录）"
-    latest_section = latest_message
-    if latest_images:
-        latest_section = _append_image_hint(latest_section, len(latest_images))
-    prompt = plugin_config.simple_gpt_prompt_template.format(
-        history=history_lines, sender=sender, latest_message=latest_section
-    )
-    return prompt
+        # 被动回复：保持原有行为
+        if history:
+            history_lines = "\n".join(_format_history_entry(e) for e in history)
+        else:
+            history_lines = "（暂无聊天记录）"
+        latest_section = latest_message
+        if latest_images:
+            latest_section = _append_image_hint(latest_section, len(latest_images))
+        character = plugin_config.simple_gpt_prompt_template
+        return character + "\n" + _PASSIVE_REPLY_SUFFIX.format(
+            history=history_lines, sender=sender, latest_message=latest_section
+        )
 
 
 def _format_history_entry(entry: HistoryEntry) -> str:
@@ -174,6 +206,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             sender=f"{display_name}({user_id})",
             latest_message=plain_text,
             latest_images=image_contexts,
+            is_proactive=not is_tome_event,
         )
         history_images: List[str] = [
             image for entry in history_before for image in entry.images
