@@ -36,7 +36,7 @@ register_plugin_config_field(
 register_plugin_config_field(
     "simple_gpt_proactive_filter_model",
     str,
-    default="gemini-2.5-flash-lite",
+    default="gemini-3.1-flash-lite-preview",
     description="用于判断是否值得回复的模型",
 )
 
