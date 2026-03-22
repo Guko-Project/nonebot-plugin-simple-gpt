@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Dict, List
 
+from nonebot import on_command
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
 from nonebot.log import logger
+from nonebot.matcher import Matcher
+from nonebot.params import CommandArg
 
 from ...plugin_config_inject import register_plugin_config_field
 from ...plugin_system import (
@@ -195,14 +199,36 @@ class MemoryPlugin(SimpleGPTPlugin):
         assert self._extractor is not None
 
         injection_parts: List[str] = []
+        profiles: Dict[str, Dict[str, str]] = {}
+        memories: List[dict] = []
 
-        # --- 1. Profile 层：查询用户档案（global + group 合并） ---
+        # 收集当前对话参与者的 user_id（当前发言者 + 历史记录中出现的人）
+        relevant_uids: set = set()
+        sender_uid = payload.extra.get("sender_user_id", "")
+        if sender_uid:
+            relevant_uids.add(sender_uid)
+        for entry in payload.history:
+            if entry.user_id:
+                relevant_uids.add(entry.user_id)
+
+        # --- 1. Profile 层：查询并过滤为当前参与者 ---
         try:
-            profiles = await self._profile_store.get_merged_profiles(session_id)
+            all_profiles = await self._profile_store.get_merged_profiles(session_id)
+            # 只注入本次对话参与者的档案
+            profiles = (
+                {uid: kvs for uid, kvs in all_profiles.items() if uid in relevant_uids}
+                if relevant_uids
+                else all_profiles
+            )
             if profiles:
                 profile_lines = self._format_profiles(profiles)
                 injection_parts.append("## 用户档案")
                 injection_parts.extend(profile_lines)
+                logger.debug(
+                    f"simple-gpt: [memory] 注入档案 - 参与者 uid={relevant_uids}, "
+                    f"过滤后 {len(profiles)}/{len(all_profiles)} 人\n"
+                    + "\n".join(f"  {uid}: {kvs}" for uid, kvs in profiles.items())
+                )
         except Exception as exc:
             logger.warning(f"simple-gpt: 读取用户档案失败: {exc}")
 
@@ -218,6 +244,10 @@ class MemoryPlugin(SimpleGPTPlugin):
                     injection_parts.append("\n## 相关记忆")
                     for mem in memories:
                         injection_parts.append(f"- {mem['content']}")
+                    logger.debug(
+                        f"simple-gpt: [memory] 注入语义记忆 {len(memories)} 条:\n"
+                        + "\n".join(f"  - {m['content']}" for m in memories)
+                    )
         except Exception as exc:
             logger.warning(f"simple-gpt: 语义记忆检索失败: {exc}")
 
@@ -227,8 +257,8 @@ class MemoryPlugin(SimpleGPTPlugin):
             payload.prompt = memory_block + payload.prompt
             payload.extra["injected_memories"] = True
             logger.info(
-                f"simple-gpt: 已注入记忆到 prompt "
-                f"(profiles={bool(profiles)}, semantic_count={len(memories) if 'memories' in dir() else 0})"
+                f"simple-gpt: [memory] 已注入记忆 "
+                f"(档案 {len(profiles)} 人, 语义记忆 {len(memories)} 条)"
             )
 
         return payload
@@ -304,31 +334,55 @@ class MemoryPlugin(SimpleGPTPlugin):
                     scope=scope,
                 )
                 stored_profiles += 1
-            if stored_profiles:
-                logger.info(
-                    f"simple-gpt: 已存储 {stored_profiles} 条用户档案"
+                logger.debug(
+                    f"simple-gpt: [memory] 存储档案 "
+                    f"uid={real_uid}({display_name}) scope={scope} "
+                    f"{profile['key']}={profile['value']!r}"
                 )
+            if stored_profiles:
+                logger.info(f"simple-gpt: [memory] 已存储 {stored_profiles} 条用户档案")
 
-            # 存储 semantic memories
+            # 存储 semantic memories（语义去重：相似度 >= 0.85 则跳过）
+            DEDUP_THRESHOLD = 0.85
             memories = extraction.get("memories", [])
             stored_count = 0
+            skipped_count = 0
             for mem in memories:
                 vector = await self._extractor.generate_embedding(mem["content"])
-                if vector:
-                    await self._semantic_store.add(
-                        {
-                            "session_id": session_id,
-                            "content": mem["content"],
-                            "speaker": mem.get("speaker", ""),
-                            "category": mem.get("category", "fact"),
-                            "importance": mem.get("importance", 0.5),
-                        },
-                        vector,
+                if not vector:
+                    continue
+                # 检查是否已有高相似度的记忆
+                existing = await self._semantic_store.search(
+                    vector, session_id, top_k=1
+                )
+                if existing and existing[0].get("similarity", 0) >= DEDUP_THRESHOLD:
+                    skipped_count += 1
+                    logger.debug(
+                        f"simple-gpt: [memory] 跳过重复记忆 "
+                        f"(similarity={existing[0]['similarity']:.3f}): "
+                        f"{mem['content']!r} ≈ {existing[0]['content']!r}"
                     )
-                    stored_count += 1
-            if stored_count:
+                    continue
+                await self._semantic_store.add(
+                    {
+                        "session_id": session_id,
+                        "content": mem["content"],
+                        "speaker": mem.get("speaker", ""),
+                        "category": mem.get("category", "fact"),
+                        "importance": mem.get("importance", 0.5),
+                    },
+                    vector,
+                )
+                stored_count += 1
+                logger.debug(
+                    f"simple-gpt: [memory] 存储语义记忆 "
+                    f"category={mem.get('category')} importance={mem.get('importance')} "
+                    f"speaker={mem.get('speaker')!r}: {mem['content']!r}"
+                )
+            if stored_count or skipped_count:
                 logger.info(
-                    f"simple-gpt: 已存储 {stored_count} 条语义记忆"
+                    f"simple-gpt: [memory] 语义记忆: "
+                    f"存储 {stored_count} 条, 去重跳过 {skipped_count} 条"
                 )
 
         except Exception as exc:
@@ -355,11 +409,9 @@ class MemoryPlugin(SimpleGPTPlugin):
         """将用户档案格式化为可读文本。"""
         lines: List[str] = []
         for user_id, kvs in profiles.items():
-            parts: List[str] = []
-            nickname = kvs.pop("nickname", None)
+            nickname = kvs.get("nickname")  # 不用 pop，避免 mutate 原始 dict
             display = f"{user_id}（昵称: {nickname}）" if nickname else user_id
-            for key, value in kvs.items():
-                parts.append(f"{key}: {value}")
+            parts = [f"{k}: {v}" for k, v in kvs.items() if k != "nickname"]
             if parts:
                 lines.append(f"- {display}: {', '.join(parts)}")
             elif nickname:
@@ -367,4 +419,163 @@ class MemoryPlugin(SimpleGPTPlugin):
         return lines
 
 
-register_simple_gpt_plugin(MemoryPlugin())
+_plugin_instance = MemoryPlugin()
+register_simple_gpt_plugin(_plugin_instance)
+
+
+# ---------- 命令公共工具 ----------
+
+def _check_permission(event: GroupMessageEvent, bot: Bot) -> tuple[bool, bool]:
+    """返回 (is_admin, is_superuser)。is_admin 包含 owner/admin。"""
+    role = event.sender.role
+    is_admin = role in ("owner", "admin")
+    is_superuser = str(event.user_id) in bot.config.superusers
+    return is_admin, is_superuser
+
+
+def _resolve_target_group(
+    arg_text: str, current_group_id: int, is_superuser: bool
+) -> tuple[int | None, str | None]:
+    """解析目标群号。返回 (group_id, error_msg)。"""
+    if not arg_text:
+        return current_group_id, None
+    if not arg_text.isdigit():
+        return None, "群号格式错误，请输入纯数字。"
+    target = int(arg_text)
+    if target != current_group_id and not is_superuser:
+        return None, "只有超级用户才能操作其他群的记忆。"
+    return target, None
+
+
+def _get_stores():
+    plugin = _plugin_instance
+    plugin._ensure_config_loaded()
+    return plugin._enabled, plugin._profile_store, plugin._semantic_store
+
+
+# ---------- 清除记忆命令 ----------
+
+_clear_memory_cmd = on_command(
+    "清除记忆",
+    aliases={"clear_memory", "清除群记忆"},
+    priority=1,
+    block=True,
+)
+
+
+@_clear_memory_cmd.handle()
+async def _handle_clear_memory(
+    matcher: Matcher,
+    bot: Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+) -> None:
+    is_admin, is_superuser = _check_permission(event, bot)
+    if not is_admin and not is_superuser:
+        await matcher.finish("只有群管理员或超级用户才能清除记忆。")
+
+    enabled, profile_store, semantic_store = _get_stores()
+    if not enabled:
+        await matcher.finish("记忆插件未启用。")
+    assert profile_store is not None and semantic_store is not None
+
+    arg_text = args.extract_plain_text().strip()
+    target_group_id, err = _resolve_target_group(
+        arg_text, event.group_id, is_superuser
+    )
+    if err:
+        await matcher.finish(err)
+
+    session_id = f"group_{target_group_id}"
+    profile_count = await profile_store.delete_session(session_id)
+    memory_count = await semantic_store.delete_session(session_id)
+
+    logger.info(
+        f"simple-gpt: [memory] 用户 {event.user_id} 清除了群 {target_group_id} 的记忆 "
+        f"(档案 {profile_count} 条, 语义记忆 {memory_count} 条)"
+    )
+    suffix = f"（群 {target_group_id}）" if target_group_id != event.group_id else "本群"
+    await matcher.finish(
+        f"已清除{suffix}所有记忆：\n"
+        f"- 群内用户档案：{profile_count} 条\n"
+        f"- 语义记忆：{memory_count} 条\n"
+        f"（跨群通用档案如生日、职业等不受影响）"
+    )
+
+
+# ---------- 查看记忆命令 ----------
+
+_view_memory_cmd = on_command(
+    "查看记忆",
+    aliases={"view_memory", "查看群记忆"},
+    priority=1,
+    block=True,
+)
+
+
+@_view_memory_cmd.handle()
+async def _handle_view_memory(
+    matcher: Matcher,
+    bot: Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+) -> None:
+    is_admin, is_superuser = _check_permission(event, bot)
+    if not is_admin and not is_superuser:
+        await matcher.finish("只有群管理员或超级用户才能查看记忆。")
+
+    enabled, profile_store, semantic_store = _get_stores()
+    if not enabled:
+        await matcher.finish("记忆插件未启用。")
+    assert profile_store is not None and semantic_store is not None
+
+    arg_text = args.extract_plain_text().strip()
+    target_group_id, err = _resolve_target_group(
+        arg_text, event.group_id, is_superuser
+    )
+    if err:
+        await matcher.finish(err)
+
+    session_id = f"group_{target_group_id}"
+    suffix = f"群 {target_group_id}" if target_group_id != event.group_id else "本群"
+
+    profiles = await profile_store.get_merged_profiles(session_id)
+    memories = await semantic_store.get_all_session(session_id)
+
+    # 构建私聊消息
+    lines: List[str] = [f"=== {suffix} 的记忆 ===\n"]
+
+    lines.append(f"【用户档案】共 {sum(len(v) for v in profiles.values())} 条")
+    if profiles:
+        for uid, kvs in profiles.items():
+            nickname = kvs.get("nickname", "")
+            display = f"{uid}（{nickname}）" if nickname else uid
+            attrs = ", ".join(f"{k}={v}" for k, v in kvs.items() if k != "nickname")
+            lines.append(f"  {display}: {attrs}" if attrs else f"  {display}")
+    else:
+        lines.append("  （暂无）")
+
+    lines.append(f"\n【语义记忆】共 {len(memories)} 条（按时间倒序）")
+    if memories:
+        for i, mem in enumerate(memories, 1):
+            ts = mem["created_at"][:10]
+            lines.append(
+                f"  {i}. [{mem['category']}] {mem['content']}"
+                f"\n     来源: {mem['speaker'] or '未知'}  时间: {ts}"
+                f"  重要度: {mem['importance']:.1f}"
+            )
+    else:
+        lines.append("  （暂无）")
+
+    full_msg = "\n".join(lines)
+
+    # 分段发送（避免私聊消息过长）
+    MAX_LEN = 1000
+    chunks = [full_msg[i:i + MAX_LEN] for i in range(0, len(full_msg), MAX_LEN)]
+    try:
+        for chunk in chunks:
+            await bot.send_private_msg(user_id=event.user_id, message=chunk)
+        await matcher.finish(f"已通过私聊发送{suffix}的记忆内容。")
+    except Exception as exc:
+        logger.warning(f"simple-gpt: [memory] 私聊发送失败: {exc}")
+        await matcher.finish("私聊发送失败，请先添加 Bot 为好友。")

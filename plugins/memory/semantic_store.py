@@ -74,7 +74,7 @@ class SemanticStore:
     async def search(
         self, query_vector: List[float], session_id: str, top_k: int
     ) -> List[Dict[str, Any]]:
-        """向量相似度搜索，按 session_id 过滤。"""
+        """向量相似度搜索，按 session_id 过滤。返回结果包含 similarity 字段。"""
 
         def _do() -> List[Dict[str, Any]]:
             table = self._ensure_connection()
@@ -92,6 +92,9 @@ class SemanticStore:
 
             memories: List[Dict[str, Any]] = []
             for _, row in results.iterrows():
+                # LanceDB cosine metric 返回 _distance (0=完全相同, 2=完全相反)
+                # 转换为 similarity: 1 - distance
+                distance = float(row.get("_distance", 1.0))
                 memories.append(
                     {
                         "content": row["content"],
@@ -99,8 +102,52 @@ class SemanticStore:
                         "category": row["category"],
                         "importance": float(row["importance"]),
                         "created_at": row["created_at"],
+                        "similarity": 1.0 - distance,
                     }
                 )
             return memories
+
+        return await asyncio.to_thread(_do)
+
+    async def delete_session(self, session_id: str) -> int:
+        """删除某 session 的所有语义记忆。返回删除行数。"""
+
+        def _do() -> int:
+            table = self._ensure_connection()
+            try:
+                before = table.count_rows()
+                table.delete(f"session_id = '{session_id}'")
+                after = table.count_rows()
+                return before - after
+            except Exception as exc:
+                logger.debug(f"simple-gpt: 语义记忆删除失败: {exc}")
+                return 0
+
+        return await asyncio.to_thread(_do)
+
+    async def get_all_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """获取某 session 的所有语义记忆（不做向量搜索，按时间排序）。"""
+
+        def _do() -> List[Dict[str, Any]]:
+            table = self._ensure_connection()
+            try:
+                df = table.to_pandas()
+                df = df[df["session_id"] == session_id].sort_values(
+                    "created_at", ascending=False
+                )
+            except Exception as exc:
+                logger.debug(f"simple-gpt: 语义记忆全量读取失败: {exc}")
+                return []
+
+            return [
+                {
+                    "content": row["content"],
+                    "speaker": row["speaker"],
+                    "category": row["category"],
+                    "importance": float(row["importance"]),
+                    "created_at": row["created_at"],
+                }
+                for _, row in df.iterrows()
+            ]
 
         return await asyncio.to_thread(_do)

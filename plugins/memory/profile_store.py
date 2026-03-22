@@ -110,3 +110,17 @@ class ProfileStore:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+    async def delete_session(self, session_id: str) -> int:
+        """删除某群的 group 层档案（不影响 global 层）。返回删除行数。"""
+
+        def _do() -> int:
+            conn = self._ensure_connection()
+            cursor = conn.execute(
+                "DELETE FROM user_profiles WHERE session_id = ?",
+                (session_id,),
+            )
+            conn.commit()
+            return cursor.rowcount
+
+        return await asyncio.to_thread(_do)

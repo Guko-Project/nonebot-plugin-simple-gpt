@@ -100,7 +100,8 @@ def _format_history_entry(entry: HistoryEntry) -> str:
     content = entry.content
     if entry.images:
         content = _append_image_hint(content, len(entry.images))
-    return f"{entry.speaker}：{content}"
+    speaker = f"{entry.speaker}({entry.user_id})" if entry.user_id else entry.speaker
+    return f"{speaker}：{content}"
 
 
 def _append_image_hint(content: str, count: int) -> str:
@@ -170,7 +171,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
     if reply_needed:
         prompt = generate_prompt(
             history=history_before,
-            sender=display_name,
+            sender=f"{display_name}({user_id})",
             latest_message=plain_text,
             latest_images=image_contexts,
         )
@@ -193,6 +194,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
         # 被 @ 时提高重试次数，主动发言保持默认重试次数
         max_retries = 5 if is_tome_event else 3
         if reply_needed:
+            logger.debug(f"最终 prompt: {llm_request}")
             generated = await generate_chat_reply(
                 prompt=llm_request.prompt,
                 api_key=plugin_config.simple_gpt_api_key,
