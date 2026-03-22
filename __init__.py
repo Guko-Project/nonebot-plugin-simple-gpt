@@ -184,45 +184,49 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
             sender=display_name,
             latest_message=plain_text,
             images=combined_images,
-            extra={"session_id": session_id, "sender_user_id": user_id},
+            extra={"session_id": session_id, "sender_user_id": user_id, "is_proactive": not is_tome_event},
         )
         llm_request = await emit_before_llm_request(llm_request)
+        if llm_request.extra.get("skip_llm"):
+            logger.info("simple-gpt: 插件判断无需回复，跳过主动发言")
+            reply_needed = False
         # 被 @ 时提高重试次数，主动发言保持默认重试次数
         max_retries = 5 if is_tome_event else 3
-        generated = await generate_chat_reply(
-            prompt=llm_request.prompt,
-            api_key=plugin_config.simple_gpt_api_key,
-            base_url=plugin_config.simple_gpt_api_base,
-            model=plugin_config.simple_gpt_model,
-            temperature=plugin_config.simple_gpt_temperature,
-            max_tokens=plugin_config.simple_gpt_max_tokens,
-            timeout=plugin_config.simple_gpt_timeout,
-            images=llm_request.images,
-            debug=plugin_config.simple_gpt_prompt_debug,
-            max_retries=max_retries,
-        )
-        # 主动发言时，如果服务器错误则不回复
-        if not generated and not is_tome_event:
-            logger.error(
-                "simple-gpt: 主动发言时，服务器返回错误，忽略该次主动发言"
+        if reply_needed:
+            generated = await generate_chat_reply(
+                prompt=llm_request.prompt,
+                api_key=plugin_config.simple_gpt_api_key,
+                base_url=plugin_config.simple_gpt_api_base,
+                model=plugin_config.simple_gpt_model,
+                temperature=plugin_config.simple_gpt_temperature,
+                max_tokens=plugin_config.simple_gpt_max_tokens,
+                timeout=plugin_config.simple_gpt_timeout,
+                images=llm_request.images,
+                debug=plugin_config.simple_gpt_prompt_debug,
+                max_retries=max_retries,
             )
-            reply_needed = False
-        else:
-            reply_text = generated or plugin_config.simple_gpt_failure_reply
-            response_payload = LLMResponsePayload(
-                content=reply_text,
-                request=llm_request,
-            )
-            response_payload = await emit_after_llm_response(response_payload)
-            reply_text = response_payload.content
-            lines = [line.strip() for line in reply_text.split("///") if line.strip()]
-            for idx, line in enumerate(lines):
-                await asyncio.sleep(random.uniform(1.0, 3.0))
-                if idx == 0:
-                    message = MessageSegment.reply(event.message_id) + line
-                else:
-                    message = line
-                await matcher.send(message)
+            # 主动发言时，如果服务器错误则不回复
+            if not generated and not is_tome_event:
+                logger.error(
+                    "simple-gpt: 主动发言时，服务器返回错误，忽略该次主动发言"
+                )
+                reply_needed = False
+            else:
+                reply_text = generated or plugin_config.simple_gpt_failure_reply
+                response_payload = LLMResponsePayload(
+                    content=reply_text,
+                    request=llm_request,
+                )
+                response_payload = await emit_after_llm_response(response_payload)
+                reply_text = response_payload.content
+                lines = [line.strip() for line in reply_text.split("///") if line.strip()]
+                for idx, line in enumerate(lines):
+                    await asyncio.sleep(random.uniform(1.0, 3.0))
+                    if idx == 0:
+                        message = MessageSegment.reply(event.message_id) + line
+                    else:
+                        message = line
+                    await matcher.send(message)
 
     history_manager.append(
         session_id,
