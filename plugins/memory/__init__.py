@@ -200,7 +200,8 @@ class MemoryPlugin(SimpleGPTPlugin):
 
         injection_parts: List[str] = []
         profiles: Dict[str, Dict[str, str]] = {}
-        memories: List[dict] = []
+        user_memories: List[dict] = []
+        group_memories: List[dict] = []
 
         # 收集当前对话参与者的 user_id（当前发言者 + 历史记录中出现的人）
         relevant_uids: set = set()
@@ -232,21 +233,44 @@ class MemoryPlugin(SimpleGPTPlugin):
         except Exception as exc:
             logger.warning(f"simple-gpt: 读取用户档案失败: {exc}")
 
-        # --- 2. Semantic 层：向量搜索相关记忆 ---
+        # --- 2. Semantic 层：分两路搜索（用户记忆 + 群体记忆） ---
         try:
             query_text = payload.latest_message
             query_vector = await self._extractor.generate_embedding(query_text)
             if query_vector:
-                memories = await self._semantic_store.search(
-                    query_vector, session_id, self._top_k
+                half_k = max(1, self._top_k // 2)
+                rest_k = self._top_k - half_k
+
+                # 2a. 当前发言者的个人记忆
+                if sender_uid:
+                    user_memories = await self._semantic_store.search(
+                        query_vector, session_id, half_k,
+                        related_user_id=sender_uid,
+                    )
+                # 2b. 群体记忆（related_user_id 为空）
+                group_memories = await self._semantic_store.search(
+                    query_vector, session_id, rest_k,
+                    related_user_id="",
                 )
-                if memories:
-                    injection_parts.append("\n## 相关记忆")
-                    for mem in memories:
+
+                if user_memories:
+                    injection_parts.append("\n## 关于当前用户的记忆")
+                    for mem in user_memories:
                         injection_parts.append(f"- {mem['content']}")
+                if group_memories:
+                    injection_parts.append("\n## 群体记忆")
+                    for mem in group_memories:
+                        injection_parts.append(f"- {mem['content']}")
+
+                all_memories = user_memories + group_memories
+                if all_memories:
                     logger.debug(
-                        f"simple-gpt: [memory] 注入语义记忆 {len(memories)} 条:\n"
-                        + "\n".join(f"  - {m['content']}" for m in memories)
+                        f"simple-gpt: [memory] 注入语义记忆 "
+                        f"(用户 {len(user_memories)} 条, 群体 {len(group_memories)} 条):\n"
+                        + "\n".join(
+                            f"  - [uid={m.get('related_user_id', '')}] {m['content']}"
+                            for m in all_memories
+                        )
                     )
         except Exception as exc:
             logger.warning(f"simple-gpt: 语义记忆检索失败: {exc}")
@@ -258,7 +282,9 @@ class MemoryPlugin(SimpleGPTPlugin):
             payload.extra["injected_memories"] = True
             logger.info(
                 f"simple-gpt: [memory] 已注入记忆 "
-                f"(档案 {len(profiles)} 人, 语义记忆 {len(memories)} 条)"
+                f"(档案 {len(profiles)} 人, "
+                f"用户记忆 {len(user_memories)} 条, "
+                f"群体记忆 {len(group_memories)} 条)"
             )
 
         return payload
@@ -351,6 +377,13 @@ class MemoryPlugin(SimpleGPTPlugin):
                 vector = await self._extractor.generate_embedding(mem["content"])
                 if not vector:
                     continue
+                # 映射 related_user display_name → QQ user_id
+                related_user_display = mem.get("related_user", "")
+                related_user_id = (
+                    name_to_uid.get(related_user_display, "")
+                    if related_user_display
+                    else ""
+                )
                 # 检查是否已有高相似度的记忆
                 existing = await self._semantic_store.search(
                     vector, session_id, top_k=1
@@ -370,6 +403,7 @@ class MemoryPlugin(SimpleGPTPlugin):
                         "speaker": mem.get("speaker", ""),
                         "category": mem.get("category", "fact"),
                         "importance": mem.get("importance", 0.5),
+                        "related_user_id": related_user_id,
                     },
                     vector,
                 )
@@ -377,6 +411,7 @@ class MemoryPlugin(SimpleGPTPlugin):
                 logger.debug(
                     f"simple-gpt: [memory] 存储语义记忆 "
                     f"category={mem.get('category')} importance={mem.get('importance')} "
+                    f"related_user={related_user_display!r}→{related_user_id!r} "
                     f"speaker={mem.get('speaker')!r}: {mem['content']!r}"
                 )
             if stored_count or skipped_count:
@@ -559,8 +594,10 @@ async def _handle_view_memory(
     if memories:
         for i, mem in enumerate(memories, 1):
             ts = mem["created_at"][:10]
+            ruid = mem.get("related_user_id", "")
+            scope_tag = f"用户:{ruid}" if ruid else "群体"
             lines.append(
-                f"  {i}. [{mem['category']}] {mem['content']}"
+                f"  {i}. [{mem['category']}][{scope_tag}] {mem['content']}"
                 f"\n     来源: {mem['speaker'] or '未知'}  时间: {ts}"
                 f"  重要度: {mem['importance']:.1f}"
             )
@@ -575,7 +612,5 @@ async def _handle_view_memory(
     try:
         for chunk in chunks:
             await bot.send_private_msg(user_id=event.user_id, message=chunk)
-        await matcher.finish(f"已通过私聊发送{suffix}的记忆内容。")
     except Exception as exc:
         logger.warning(f"simple-gpt: [memory] 私聊发送失败: {exc}")
-        await matcher.finish("私聊发送失败，请先添加 Bot 为好友。")

@@ -12,34 +12,44 @@ from ...models import HistoryEntry
 
 # ---------- Prompts ----------
 
-EXTRACTION_SYSTEM_PROMPT = """你是一个记忆管理助手。分析以下对话，提取两类信息：
+EXTRACTION_SYSTEM_PROMPT = """你是一个记忆管理助手。分析以下对话，提取三类**互斥**的信息：
 
-## profiles（用户档案）
-高频结构化信息，用于快速识别和了解用户。每条包含:
+## 1. profiles（用户档案）—— 仅限稳定属性
+长期不变的结构化属性。**如果信息是稳定的、可用 key-value 表示的，放这里，不要放 memories。**
+每条包含:
 - user_id: 用户的显示名（和对话中出现的一致）
-- key: 档案类型，如 "nickname"（昵称/外号/称呼）、"occupation"（职业）、"preference_food"（食物偏好）、"preference_game"（游戏偏好）、"skill"（技能）、"birthday"（生日）等
+- key: 属性名，如 "nickname"、"occupation"、"birthday"、"gender"、"preference_food"、"preference_game"、"skill" 等
 - value: 对应的值
-- scope: "global"（跨群通用，如生日、职业、固定偏好）或 "group"（仅限当前群，如群内昵称、群内角色）
+- scope: "global"（跨群通用）或 "group"（仅限当前群）
 
-scope 判断规则：
+scope 判断：
 - global: 生日、年龄、职业、性别、固定兴趣爱好、技能等不会因群而异的属性
-- group: 昵称/外号（同一个人在不同群可能叫法不同）、群内职务、群内特定关系等
+- group: 昵称/外号、群内职务、群内特定关系等
 
-## memories（语义记忆）
-值得长期记住的具体事实/事件/指令。每条包含:
+## 2. memories（语义记忆）—— 仅限时效性/事件性信息
+具体的事件、计划、临时状态等**不适合用 key-value 表示**的信息。每条包含:
 - content: 简洁完整的描述（能脱离上下文独立理解）
-- category: "fact"（事实）| "event"（事件）| "instruction"（指令/请求）
+- category: "fact"（临时事实）| "event"（事件）| "instruction"（指令/请求）
 - importance: 0.0-1.0（重要程度）
-- speaker: 相关人物的显示名
+- speaker: 相关人物的显示名（可为空）
+- related_user: 如果这条记忆与某个特定用户相关，填该用户的显示名；如果是群体事件则留空 ""
 
-规则：
+**互斥规则（最重要）：**
+- "小明喜欢吃辣" → profiles（稳定偏好，key=preference_food, value=辣）
+- "小明下周要出差" → memories（临时事件，related_user="小明"）
+- "群里计划周末打游戏" → memories（群体事件，related_user=""）
+- "小明是程序员" → profiles（稳定属性，key=occupation）
+- "小明最近在学 Rust" → memories（临时状态，related_user="小明"）
+- 绝对不要把同一条信息同时放入 profiles 和 memories
+
+其他规则：
 1. 只提取具体、有用的信息，忽略闲聊和无意义内容
 2. 每条记忆应简洁完整，能脱离上下文独立理解
 3. 没有值得记忆的内容则对应字段返回空数组
 4. 不要重复提取已经在"已有记忆"中存在的信息
 
 请严格以 JSON 格式返回，不要包含其他内容：
-{"profiles": [{"user_id": "...", "key": "...", "value": "...", "scope": "global|group"}], "memories": [{"content": "...", "category": "fact|event|instruction", "importance": 0.0, "speaker": "..."}]}"""
+{"profiles": [{"user_id": "...", "key": "...", "value": "...", "scope": "global|group"}], "memories": [{"content": "...", "category": "fact|event|instruction", "importance": 0.0, "speaker": "...", "related_user": "..."}]}"""
 
 
 def _parse_json_response(text: str) -> Dict[str, Any]:

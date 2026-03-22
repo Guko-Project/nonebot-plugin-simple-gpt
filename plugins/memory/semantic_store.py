@@ -36,6 +36,7 @@ class SemanticStore:
                 pa.field("speaker", pa.utf8()),
                 pa.field("category", pa.utf8()),
                 pa.field("importance", pa.float32()),
+                pa.field("related_user_id", pa.utf8()),
                 pa.field("created_at", pa.utf8()),
                 pa.field(
                     "vector", pa.list_(pa.float32(), self._embedding_dim)
@@ -44,7 +45,16 @@ class SemanticStore:
         )
 
         try:
-            self._table = self._db.open_table("memories")
+            table = self._db.open_table("memories")
+            # 检查是否有 related_user_id 列，没有则重建
+            existing_names = {f.name for f in table.schema}
+            if "related_user_id" not in existing_names:
+                logger.info(
+                    "simple-gpt: memory semantic_store schema 变更，重建表"
+                )
+                self._db.drop_table("memories")
+                table = self._db.create_table("memories", schema=schema)
+            self._table = table
         except Exception:
             self._table = self._db.create_table("memories", schema=schema)
 
@@ -64,6 +74,7 @@ class SemanticStore:
                 "speaker": memory.get("speaker", ""),
                 "category": memory.get("category", "fact"),
                 "importance": float(memory.get("importance", 0.5)),
+                "related_user_id": memory.get("related_user_id", ""),
                 "created_at": now,
                 "vector": vector,
             }
@@ -72,16 +83,30 @@ class SemanticStore:
         await asyncio.to_thread(_do)
 
     async def search(
-        self, query_vector: List[float], session_id: str, top_k: int
+        self,
+        query_vector: List[float],
+        session_id: str,
+        top_k: int,
+        *,
+        related_user_id: str | None = None,
     ) -> List[Dict[str, Any]]:
-        """向量相似度搜索，按 session_id 过滤。返回结果包含 similarity 字段。"""
+        """向量相似度搜索，按 session_id 过滤。
+
+        related_user_id:
+          - None: 不过滤（返回所有记忆）
+          - "": 仅返回群体记忆（related_user_id 为空）
+          - 具体 uid: 仅返回该用户的记忆
+        """
 
         def _do() -> List[Dict[str, Any]]:
             table = self._ensure_connection()
             try:
+                where = f"session_id = '{session_id}'"
+                if related_user_id is not None:
+                    where += f" AND related_user_id = '{related_user_id}'"
                 results = (
                     table.search(query_vector)
-                    .where(f"session_id = '{session_id}'")
+                    .where(where)
                     .metric("cosine")
                     .limit(top_k)
                     .to_pandas()
@@ -92,8 +117,6 @@ class SemanticStore:
 
             memories: List[Dict[str, Any]] = []
             for _, row in results.iterrows():
-                # LanceDB cosine metric 返回 _distance (0=完全相同, 2=完全相反)
-                # 转换为 similarity: 1 - distance
                 distance = float(row.get("_distance", 1.0))
                 memories.append(
                     {
@@ -101,6 +124,7 @@ class SemanticStore:
                         "speaker": row["speaker"],
                         "category": row["category"],
                         "importance": float(row["importance"]),
+                        "related_user_id": row.get("related_user_id", ""),
                         "created_at": row["created_at"],
                         "similarity": 1.0 - distance,
                     }
@@ -145,6 +169,7 @@ class SemanticStore:
                     "speaker": row["speaker"],
                     "category": row["category"],
                     "importance": float(row["importance"]),
+                    "related_user_id": row.get("related_user_id", ""),
                     "created_at": row["created_at"],
                 }
                 for _, row in df.iterrows()
