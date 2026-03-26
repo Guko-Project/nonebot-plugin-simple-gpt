@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simple GPT Memory Admin</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f1ea;
+      --panel: #fffdf8;
+      --panel-2: #f8f4ed;
+      --line: #d8cfbf;
+      --text: #2f2923;
+      --muted: #74685d;
+      --accent: #a8582f;
+      --accent-2: #d78746;
+      --danger: #b2412d;
+      --shadow: 0 12px 30px rgba(82, 54, 32, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Noto Serif SC", "Source Han Serif SC", serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(215, 135, 70, 0.18), transparent 30%),
+        linear-gradient(180deg, #f5efe4 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.88);
+      backdrop-filter: blur(14px);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .brand p, .hint, .subtle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .sidebar .panel {
+      padding: 14px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    input, select, textarea, button {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    button {
+      cursor: pointer;
+      background: linear-gradient(180deg, var(--accent-2), var(--accent));
+      color: #fff9f1;
+      border: none;
+      font-weight: 700;
+    }
+
+    button.secondary {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+
+    .main {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .title-block h2 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.1;
+    }
+
+    .title-block p {
+      margin: 6px 0 0;
+      color: var(--muted);
+    }
+
+    .status {
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(215, 135, 70, 0.14);
+      color: var(--accent);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .toolbar .field {
+      min-width: 140px;
+      flex: 1 1 160px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      width: auto;
+      padding: 10px 16px;
+      background: var(--panel-2);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+
+    .tab.active {
+      background: #fff;
+      color: var(--text);
+      border-color: var(--accent-2);
+      box-shadow: inset 0 0 0 1px rgba(215, 135, 70, 0.3);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.95fr);
+      gap: 18px;
+      min-height: 0;
+    }
+
+    .list-panel, .detail-panel {
+      padding: 16px;
+      min-height: 500px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .section-title h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,244,237,0.9));
+      cursor: pointer;
+    }
+
+    .item.active {
+      border-color: var(--accent-2);
+      box-shadow: inset 0 0 0 1px rgba(215, 135, 70, 0.3);
+    }
+
+    .item-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+
+    .item-title {
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .meta {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .snippet {
+      font-size: 14px;
+      line-height: 1.5;
+      color: #40362e;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .detail {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: auto;
+    }
+
+    .detail-block {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel-2);
+      padding: 12px;
+    }
+
+    .detail-block h4 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: "Iosevka", "SFMono-Regular", monospace;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .session-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 320px;
+      overflow: auto;
+    }
+
+    .session-btn {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+    }
+
+    .session-btn.active {
+      background: rgba(215, 135, 70, 0.12);
+      border-color: var(--accent-2);
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .row > * {
+      flex: 1;
+    }
+
+    .danger {
+      color: var(--danger);
+    }
+
+    @media (max-width: 960px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .content {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>Memory Admin</h1>
+        <p>查看档案、语义记忆和每轮调试数据。</p>
+      </div>
+
+      <div class="panel">
+        <label for="token">Admin Token</label>
+        <div class="row">
+          <input id="token" type="password" placeholder="Bearer token" />
+          <button id="save-token" style="max-width: 96px;">保存</button>
+        </div>
+        <p class="hint" style="margin-top: 8px;">仅保存在当前浏览器的 localStorage。</p>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="align-items: end;">
+          <div style="flex: 1;">
+            <label for="session-search">群号</label>
+            <input id="session-search" type="text" placeholder="输入纯数字群号" />
+          </div>
+          <button id="apply-session" style="max-width: 96px;">进入</button>
+        </div>
+        <p class="hint" style="margin-top: 8px;">不会默认加载全部群聊。输入群号后按“进入”，页面会使用 `group_群号` 作为 session_id。</p>
+        <div class="session-list" id="session-list" style="margin-top: 12px;"></div>
+      </div>
+
+      <div class="panel">
+        <p class="subtle" id="health-text">等待连接管理接口。</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="title-block">
+          <h2 id="page-title">未选择 Session</h2>
+          <p id="page-subtitle">先在左侧输入群号，再查看 profiles / memories / dialogues。</p>
+        </div>
+        <div class="status" id="status-pill">Idle</div>
+      </div>
+
+      <section class="panel" style="padding: 16px;">
+        <div class="tabs">
+          <button class="tab active" data-tab="profiles">Profiles</button>
+          <button class="tab" data-tab="memories">Memories</button>
+          <button class="tab" data-tab="dialogues">Dialogues</button>
+        </div>
+        <div class="toolbar" style="margin-top: 14px;">
+          <div class="field">
+            <label for="user-filter">User ID</label>
+            <input id="user-filter" type="text" placeholder="仅 profiles 使用" />
+          </div>
+          <div class="field">
+            <label for="key-filter">Key / Category</label>
+            <input id="key-filter" type="text" placeholder="key 或 category" />
+          </div>
+          <div class="field">
+            <label for="related-filter">Related User</label>
+            <input id="related-filter" type="text" placeholder="memories 使用" />
+          </div>
+          <div class="field">
+            <label for="keyword-filter">Keyword</label>
+            <input id="keyword-filter" type="text" placeholder="memories 使用" />
+          </div>
+          <div class="field" style="max-width: 120px;">
+            <label for="page-size">Page Size</label>
+            <select id="page-size">
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div class="field" style="max-width: 120px;">
+            <label for="page-input">Page</label>
+            <input id="page-input" type="number" min="1" value="1" />
+          </div>
+          <div class="field" style="max-width: 140px; align-self: end;">
+            <button id="apply-filters">查询</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="content">
+        <div class="panel list-panel">
+          <div class="section-title">
+            <h3 id="list-title">列表</h3>
+            <div class="meta" id="list-meta">0 items</div>
+          </div>
+          <div class="list" id="result-list"></div>
+        </div>
+
+        <div class="panel detail-panel">
+          <div class="section-title">
+            <h3>Detail</h3>
+            <div class="meta" id="detail-meta">未选择项目</div>
+          </div>
+          <div class="detail" id="detail-view">
+            <div class="detail-block">
+              <h4>Hint</h4>
+              <pre>选择左侧列表项后，会在这里显示详细内容。</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const BASE = "/simple-gpt/memory-admin";
+    const state = {
+      token: localStorage.getItem("simple_gpt_memory_admin_token") || "",
+      tab: "profiles",
+      sessionId: "",
+      page: 1,
+      pageSize: 20,
+      items: [],
+      selectedId: null,
+      dialogueCache: new Map(),
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const tokenInput = $("token");
+    const sessionSearch = $("session-search");
+    const sessionList = $("session-list");
+    const resultList = $("result-list");
+    const detailView = $("detail-view");
+    const statusPill = $("status-pill");
+    const pageTitle = $("page-title");
+    const pageSubtitle = $("page-subtitle");
+    const healthText = $("health-text");
+    const pageInput = $("page-input");
+    const pageSizeInput = $("page-size");
+
+    tokenInput.value = state.token;
+
+    function setStatus(text, isError = false) {
+      statusPill.textContent = text;
+      statusPill.style.background = isError ? "rgba(178, 65, 45, 0.14)" : "rgba(215, 135, 70, 0.14)";
+      statusPill.style.color = isError ? "var(--danger)" : "var(--accent)";
+    }
+
+    function getHeaders() {
+      const headers = {};
+      if (state.token) {
+        headers["Authorization"] = `Bearer ${state.token}`;
+      }
+      return headers;
+    }
+
+    async function request(path, params = {}) {
+      const url = new URL(BASE + path, window.location.origin);
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== "" && value !== null && value !== undefined) {
+          url.searchParams.set(key, value);
+        }
+      });
+      const response = await fetch(url.toString(), { headers: getHeaders() });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    function renderSessions() {
+      sessionList.innerHTML = "";
+      if (!state.sessionId) {
+        sessionList.innerHTML = '<p class="subtle">请输入群号后进入。</p>';
+        return;
+      }
+      const btn = document.createElement("button");
+      btn.className = "session-btn active";
+      btn.textContent = state.sessionId;
+      btn.onclick = () => {
+        loadCurrentTab();
+      };
+      sessionList.appendChild(btn);
+    }
+
+    function renderList() {
+      $("list-title").textContent = state.tab[0].toUpperCase() + state.tab.slice(1);
+      $("list-meta").textContent = `${state.items.length} items on page ${state.page}`;
+      resultList.innerHTML = "";
+      if (!state.items.length) {
+        resultList.innerHTML = '<div class="detail-block"><h4>Empty</h4><pre>当前条件下没有数据。</pre></div>';
+        return;
+      }
+
+      state.items.forEach((item) => {
+        const el = document.createElement("div");
+        const itemId = item.id ?? `${item.user_id}:${item.session_id}:${item.key}`;
+        el.className = "item" + (state.selectedId === itemId ? " active" : "");
+        el.onclick = () => {
+          state.selectedId = itemId;
+          renderList();
+          showDetail(item);
+        };
+
+        const title = state.tab === "profiles"
+          ? `${item.key} = ${item.value}`
+          : state.tab === "memories"
+            ? item.content
+            : `${item.sender} · ${item.created_at}`;
+
+        const meta = state.tab === "profiles"
+          ? `${item.user_id} · ${item.session_id}`
+          : state.tab === "memories"
+            ? `${item.category} · ${item.related_user_id || "group"}`
+            : `${item.session_id} · ${item.sender_user_id}`;
+
+        const snippet = state.tab === "dialogues"
+          ? item.latest_message
+          : state.tab === "profiles"
+            ? `${item.updated_at}`
+            : `${item.speaker || "unknown"} · ${item.created_at}`;
+
+        el.innerHTML = `
+          <div class="item-header">
+            <div class="item-title"></div>
+            <div class="meta"></div>
+          </div>
+          <div class="snippet"></div>
+        `;
+        el.querySelector(".item-title").textContent = title;
+        el.querySelector(".meta").textContent = meta;
+        el.querySelector(".snippet").textContent = snippet;
+        resultList.appendChild(el);
+      });
+    }
+
+    function renderJsonBlock(title, value) {
+      const block = document.createElement("div");
+      block.className = "detail-block";
+      block.innerHTML = `<h4>${title}</h4><pre></pre>`;
+      block.querySelector("pre").textContent =
+        typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      return block;
+    }
+
+    async function showDetail(item) {
+      detailView.innerHTML = "";
+      $("detail-meta").textContent = state.tab === "dialogues"
+        ? `dialogue #${item.id}`
+        : state.tab === "memories"
+          ? item.id || "memory"
+          : `${item.user_id} / ${item.key}`;
+
+      if (state.tab === "profiles") {
+        detailView.appendChild(renderJsonBlock("Profile", item));
+        return;
+      }
+
+      if (state.tab === "memories") {
+        detailView.appendChild(renderJsonBlock("Memory", item));
+        return;
+      }
+
+      const cached = state.dialogueCache.get(item.id);
+      if (cached) {
+        renderDialogueDetail(cached);
+        return;
+      }
+
+      setStatus("Loading detail...");
+      try {
+        const res = await request(`/dialogues/${item.id}`);
+        state.dialogueCache.set(item.id, res.data);
+        renderDialogueDetail(res.data);
+        setStatus("Detail loaded");
+      } catch (error) {
+        detailView.appendChild(renderJsonBlock("Error", String(error)));
+        setStatus("Detail load failed", true);
+      }
+    }
+
+    function renderDialogueDetail(data) {
+      detailView.innerHTML = "";
+      detailView.appendChild(renderJsonBlock("Latest Message", data.latest_message));
+      detailView.appendChild(renderJsonBlock("Final Prompt", data.final_prompt));
+      detailView.appendChild(renderJsonBlock("Reply Content", data.reply_content));
+      detailView.appendChild(renderJsonBlock("Extracted Profiles", data.extracted_profiles));
+      detailView.appendChild(renderJsonBlock("Extracted Memories", data.extracted_memories));
+      detailView.appendChild(renderJsonBlock("Stored Profiles", data.stored_profiles));
+      detailView.appendChild(renderJsonBlock("Stored Memories", data.stored_memories));
+      detailView.appendChild(renderJsonBlock("Error Text", data.error_text || ""));
+    }
+
+    async function loadHealth() {
+      try {
+        const res = await request("/health");
+        const data = res.data;
+        healthText.textContent =
+          `memory=${data.enabled} · admin=${data.admin_enabled} · debug=${data.debug_enabled}`;
+      } catch (error) {
+        healthText.textContent = `接口不可用: ${String(error)}`;
+      }
+    }
+
+    async function loadCurrentTab() {
+      if (!state.sessionId) {
+        setStatus("请先输入群号", true);
+        state.items = [];
+        state.selectedId = null;
+        renderList();
+        detailView.innerHTML = '<div class="detail-block"><h4>Hint</h4><pre>输入群号后才会发起查询。</pre></div>';
+        $("detail-meta").textContent = "未选择项目";
+        return;
+      }
+
+      state.selectedId = null;
+      detailView.innerHTML = '<div class="detail-block"><h4>Hint</h4><pre>选择左侧列表项后，会在这里显示详细内容。</pre></div>';
+      $("detail-meta").textContent = "未选择项目";
+      state.page = Math.max(1, Number(pageInput.value) || 1);
+      state.pageSize = Math.max(1, Number(pageSizeInput.value) || 20);
+
+      const params = {
+        page: state.page,
+        page_size: state.pageSize,
+      };
+
+      let path = "/profiles";
+      if (state.tab === "profiles") {
+        params.session_id = state.sessionId;
+        params.user_id = $("user-filter").value.trim();
+        params.key = $("key-filter").value.trim();
+      } else if (state.tab === "memories") {
+        path = "/memories";
+        params.session_id = state.sessionId;
+        params.category = $("key-filter").value.trim();
+        params.related_user_id = $("related-filter").value.trim();
+        params.keyword = $("keyword-filter").value.trim();
+      } else {
+        path = "/dialogues";
+        params.session_id = state.sessionId;
+      }
+
+      setStatus(`Loading ${state.tab}...`);
+      try {
+        const res = await request(path, params);
+        state.items = res.data.items || [];
+        renderList();
+        setStatus(`${state.tab} loaded`);
+      } catch (error) {
+        state.items = [];
+        renderList();
+        detailView.innerHTML = "";
+        detailView.appendChild(renderJsonBlock("Error", String(error)));
+        setStatus(`${state.tab} load failed`, true);
+      }
+    }
+
+    document.querySelectorAll(".tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((tab) => tab.classList.remove("active"));
+        btn.classList.add("active");
+        state.tab = btn.dataset.tab;
+        state.page = 1;
+        pageInput.value = "1";
+        loadCurrentTab();
+      });
+    });
+
+    $("save-token").onclick = async () => {
+      state.token = tokenInput.value.trim();
+      localStorage.setItem("simple_gpt_memory_admin_token", state.token);
+      await loadHealth();
+      if (state.sessionId) {
+        await loadCurrentTab();
+      }
+    };
+
+    $("apply-session").onclick = () => {
+      const raw = sessionSearch.value.trim();
+      if (!raw) {
+        state.sessionId = "";
+        state.items = [];
+        state.selectedId = null;
+        pageTitle.textContent = "未选择 Session";
+        pageSubtitle.textContent = "先在左侧输入群号，再查看 profiles / memories / dialogues。";
+        renderSessions();
+        renderList();
+        detailView.innerHTML = '<div class="detail-block"><h4>Hint</h4><pre>输入群号后会在这里显示详细内容。</pre></div>';
+        $("detail-meta").textContent = "未选择项目";
+        return;
+      }
+      if (!/^\d+$/.test(raw)) {
+        setStatus("群号必须是纯数字", true);
+        return;
+      }
+      state.sessionId = `group_${raw}`;
+      state.page = 1;
+      pageInput.value = "1";
+      pageTitle.textContent = state.sessionId;
+      pageSubtitle.textContent = "当前正在查看该群的存储与调试记录。";
+      renderSessions();
+      loadCurrentTab();
+    };
+    $("apply-filters").onclick = loadCurrentTab;
+    sessionSearch.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        $("apply-session").click();
+      }
+    });
+
+    loadHealth();
+    renderSessions();
+  </script>
+</body>
+</html>

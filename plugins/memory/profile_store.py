@@ -4,7 +4,7 @@ import asyncio
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Any, Dict, List
 
 from nonebot.log import logger
 
@@ -122,5 +122,83 @@ class ProfileStore:
             )
             conn.commit()
             return cursor.rowcount
+
+        return await asyncio.to_thread(_do)
+
+    async def list_profiles(
+        self,
+        *,
+        session_id: str = "",
+        user_id: str = "",
+        key: str = "",
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """分页列出档案记录。"""
+
+        def _do() -> Dict[str, Any]:
+            conn = self._ensure_connection()
+            where_parts: List[str] = []
+            params: List[Any] = []
+
+            if session_id:
+                where_parts.append("session_id = ?")
+                params.append(session_id)
+            if user_id:
+                where_parts.append("user_id = ?")
+                params.append(user_id)
+            if key:
+                where_parts.append("key = ?")
+                params.append(key)
+
+            where = ""
+            if where_parts:
+                where = "WHERE " + " AND ".join(where_parts)
+
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM user_profiles {where}",
+                params,
+            ).fetchone()[0]
+            offset = max(0, (page - 1) * page_size)
+            cursor = conn.execute(
+                f"""
+                SELECT user_id, session_id, key, value, updated_at
+                FROM user_profiles
+                {where}
+                ORDER BY updated_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                [*params, page_size, offset],
+            )
+            items = [
+                {
+                    "user_id": row[0],
+                    "session_id": row[1],
+                    "key": row[2],
+                    "value": row[3],
+                    "updated_at": row[4],
+                }
+                for row in cursor.fetchall()
+            ]
+            return {"items": items, "total": total}
+
+        return await asyncio.to_thread(_do)
+
+    async def list_sessions(self, *, limit: int = 100) -> List[str]:
+        """列出最近更新过档案的 session。"""
+
+        def _do() -> List[str]:
+            conn = self._ensure_connection()
+            cursor = conn.execute(
+                """
+                SELECT session_id, MAX(updated_at) AS latest_updated_at
+                FROM user_profiles
+                GROUP BY session_id
+                ORDER BY latest_updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [row[0] for row in cursor.fetchall()]
 
         return await asyncio.to_thread(_do)

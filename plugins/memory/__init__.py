@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import TYPE_CHECKING, Dict, List
 
-from nonebot import on_command
+from nonebot import get_driver, on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
 from nonebot.log import logger
 from nonebot.matcher import Matcher
@@ -16,6 +17,8 @@ from ...plugin_system import (
     SimpleGPTPlugin,
     register_simple_gpt_plugin,
 )
+from .admin import register_admin_api
+from .debug_store import MemoryDebugStore
 from .extractor import MemoryExtractor
 from .profile_store import ProfileStore
 from .semantic_store import SemanticStore
@@ -92,6 +95,20 @@ register_plugin_config_field(
     default="group",
     description="记忆作用范围：group（按群隔离）或 global（全局共享）",
 )
+register_plugin_config_field(
+    "simple_gpt_memory_admin_token",
+    str,
+    default="",
+    description="memory 管理 HTTP API 的 Bearer Token",
+)
+register_plugin_config_field(
+    "simple_gpt_memory_debug_max_rows",
+    int,
+    default=1000,
+    description="调试 SQLite 最多保留的对话记录数，0 表示不清理",
+    ge=0,
+    le=100000,
+)
 
 if TYPE_CHECKING:
     from ... import Config
@@ -111,11 +128,15 @@ class MemoryPlugin(SimpleGPTPlugin):
     def __init__(self) -> None:
         self._config_loaded = False
         self._enabled = False
+        self._admin_token = ""
         self._scope = "group"
         self._top_k = 5
+        self._debug_max_rows = 1000
         self._profile_store: ProfileStore | None = None
         self._semantic_store: SemanticStore | None = None
+        self._debug_store: MemoryDebugStore | None = None
         self._extractor: MemoryExtractor | None = None
+        self._admin_routes_registered = False
 
     def _ensure_config_loaded(self) -> None:
         if self._config_loaded:
@@ -123,8 +144,10 @@ class MemoryPlugin(SimpleGPTPlugin):
 
         config = _get_plugin_config()
         self._enabled = config.simple_gpt_memory_enabled
+        self._admin_token = config.simple_gpt_memory_admin_token.strip()
         self._scope = config.simple_gpt_memory_scope
         self._top_k = config.simple_gpt_memory_top_k
+        self._debug_max_rows = config.simple_gpt_memory_debug_max_rows
 
         if not self._enabled:
             self._config_loaded = True
@@ -137,6 +160,7 @@ class MemoryPlugin(SimpleGPTPlugin):
         # 初始化存储
         self._profile_store = ProfileStore(db_path)
         self._semantic_store = SemanticStore(db_path, embedding_dim)
+        self._debug_store = MemoryDebugStore(db_path, max_rows=self._debug_max_rows)
 
         # API 配置回退逻辑
         embedding_api_key = (
@@ -167,11 +191,18 @@ class MemoryPlugin(SimpleGPTPlugin):
         )
 
         self._config_loaded = True
+        if self._admin_token:
+            try:
+                self._admin_routes_registered = register_admin_api(self)
+            except Exception as exc:
+                self._admin_routes_registered = False
+                logger.warning(f"simple-gpt: memory admin API 注册失败: {exc}")
         logger.info(
             f"simple-gpt: memory 插件已加载 "
             f"(scope={self._scope}, top_k={self._top_k}, "
             f"embedding_model={config.simple_gpt_memory_embedding_model}, "
-            f"extract_model={config.simple_gpt_memory_extract_model})"
+            f"extract_model={config.simple_gpt_memory_extract_model}, "
+            f"admin_enabled={bool(self._admin_token)}, debug_enabled=True)"
         )
 
     def _resolve_session_id(self, payload_session_id: str) -> str:
@@ -193,6 +224,7 @@ class MemoryPlugin(SimpleGPTPlugin):
         )
         if not session_id:
             return payload
+        payload.extra.setdefault("memory_conversation_id", str(uuid.uuid4()))
 
         assert self._profile_store is not None
         assert self._semantic_store is not None
@@ -317,6 +349,14 @@ class MemoryPlugin(SimpleGPTPlugin):
         assert self._profile_store is not None
         assert self._semantic_store is not None
         assert self._extractor is not None
+        conversation_id = payload.request.extra.get(
+            "memory_conversation_id", str(uuid.uuid4())
+        )
+        extracted_profiles: List[Dict] = []
+        extracted_memories: List[Dict] = []
+        stored_profile_rows: List[Dict] = []
+        stored_memories: List[Dict] = []
+        error_text = ""
 
         try:
             # 构建 display_name → QQ user_id 映射
@@ -344,10 +384,12 @@ class MemoryPlugin(SimpleGPTPlugin):
                 sender=payload.request.sender,
                 existing_memories=existing_contents or None,
             )
+            extracted_profiles = list(extraction.get("profiles", []))
+            extracted_memories = list(extraction.get("memories", []))
 
             # 存储 profiles（按 scope 分层，display_name 映射到 QQ user_id）
-            profiles = extraction.get("profiles", [])
-            stored_profiles = 0
+            profiles = extracted_profiles
+            stored_profile_count = 0
             for profile in profiles:
                 display_name = profile["user_id"]
                 real_uid = name_to_uid.get(display_name, display_name)
@@ -359,18 +401,29 @@ class MemoryPlugin(SimpleGPTPlugin):
                     value=profile["value"],
                     scope=scope,
                 )
-                stored_profiles += 1
+                stored_profile_count += 1
+                stored_profile_rows.append(
+                    {
+                        "user_id": real_uid,
+                        "session_id": session_id,
+                        "key": profile["key"],
+                        "value": profile["value"],
+                        "scope": scope,
+                    }
+                )
                 logger.debug(
                     f"simple-gpt: [memory] 存储档案 "
                     f"uid={real_uid}({display_name}) scope={scope} "
                     f"{profile['key']}={profile['value']!r}"
                 )
-            if stored_profiles:
-                logger.info(f"simple-gpt: [memory] 已存储 {stored_profiles} 条用户档案")
+            if stored_profile_count:
+                logger.info(
+                    f"simple-gpt: [memory] 已存储 {stored_profile_count} 条用户档案"
+                )
 
             # 存储 semantic memories（语义去重：相似度 >= 0.85 则跳过）
             DEDUP_THRESHOLD = 0.85
-            memories = extraction.get("memories", [])
+            memories = extracted_memories
             stored_count = 0
             skipped_count = 0
             for mem in memories:
@@ -408,6 +461,17 @@ class MemoryPlugin(SimpleGPTPlugin):
                     vector,
                 )
                 stored_count += 1
+                stored_memories.append(
+                    {
+                        "session_id": session_id,
+                        "content": mem["content"],
+                        "speaker": mem.get("speaker", ""),
+                        "category": mem.get("category", "fact"),
+                        "importance": mem.get("importance", 0.5),
+                        "related_user_display": related_user_display,
+                        "related_user_id": related_user_id,
+                    }
+                )
                 logger.debug(
                     f"simple-gpt: [memory] 存储语义记忆 "
                     f"category={mem.get('category')} importance={mem.get('importance')} "
@@ -421,7 +485,32 @@ class MemoryPlugin(SimpleGPTPlugin):
                 )
 
         except Exception as exc:
+            error_text = str(exc)
             logger.exception(f"simple-gpt: 记忆提取/存储失败 - {exc}")
+        finally:
+            if self._debug_store is not None:
+                try:
+                    await self._debug_store.record_dialogue(
+                        conversation_id=conversation_id,
+                        session_id=session_id,
+                        sender=payload.request.sender,
+                        sender_user_id=payload.request.extra.get(
+                            "sender_user_id", ""
+                        ),
+                        latest_message=payload.request.latest_message,
+                        final_prompt=payload.request.prompt,
+                        reply_content=payload.content,
+                        injected_memories=bool(
+                            payload.request.extra.get("injected_memories", False)
+                        ),
+                        extracted_profiles=extracted_profiles,
+                        extracted_memories=extracted_memories,
+                        stored_profiles=stored_profile_rows,
+                        stored_memories=stored_memories,
+                        error_text=error_text,
+                    )
+                except Exception as exc:
+                    logger.warning(f"simple-gpt: 写入 memory debug 失败: {exc}")
 
     @staticmethod
     def _build_name_mapping(request: LLMRequestPayload) -> Dict[str, str]:
@@ -456,6 +545,20 @@ class MemoryPlugin(SimpleGPTPlugin):
 
 _plugin_instance = MemoryPlugin()
 register_simple_gpt_plugin(_plugin_instance)
+_driver = get_driver()
+
+
+@_driver.on_startup
+async def _startup_memory_admin() -> None:
+    _plugin_instance._ensure_config_loaded()
+
+
+@_driver.on_shutdown
+async def _close_memory_debug_store() -> None:
+    if _plugin_instance._profile_store is not None:
+        _plugin_instance._profile_store.close()
+    if _plugin_instance._debug_store is not None:
+        _plugin_instance._debug_store.close()
 
 
 # ---------- 命令公共工具 ----------
