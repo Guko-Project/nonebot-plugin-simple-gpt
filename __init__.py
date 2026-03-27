@@ -254,6 +254,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
                 )
                 response_payload = await emit_after_llm_response(response_payload)
                 reply_text = response_payload.content
+                post_messages = list(response_payload.post_messages)
                 lines = [line.strip() for line in reply_text.split("///") if line.strip()]
                 for idx, line in enumerate(lines):
                     await asyncio.sleep(random.uniform(1.0, 3.0))
@@ -262,6 +263,9 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
                     else:
                         message = line
                     await matcher.send(message)
+                for post_message in post_messages:
+                    await asyncio.sleep(random.uniform(0.8, 2.0))
+                    await matcher.send(post_message)
 
     history_manager.append(
         session_id,

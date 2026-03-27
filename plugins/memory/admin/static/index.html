@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Simple GPT Memory Admin</title>
+  <title>Simple GPT Admin</title>
   <style>
     :root {
       color-scheme: light;
@@ -343,8 +343,8 @@
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <h1>Memory Admin</h1>
-        <p>查看档案、语义记忆和每轮调试数据。</p>
+        <h1>Simple GPT Admin</h1>
+        <p>统一查看记忆数据、语义记录与表情包素材。</p>
       </div>
 
       <div class="panel">
@@ -364,9 +364,10 @@
           </div>
           <button id="apply-session" style="max-width: 96px;">进入</button>
         </div>
-        <p class="hint" style="margin-top: 8px;">不会默认加载全部群聊。输入群号后按“进入”，页面会使用 `group_群号` 作为 session_id。</p>
-        <div class="session-list" id="session-list" style="margin-top: 12px;"></div>
-      </div>
+          <p class="hint" style="margin-top: 8px;">输入群号后按“进入”，页面会使用 `group_群号` 作为 session_id。也可以直接点下方最近会话。</p>
+          <button id="refresh-sessions" class="secondary" style="margin-top: 12px;">刷新最近会话</button>
+          <div class="session-list" id="session-list" style="margin-top: 12px;"></div>
+        </div>
 
       <div class="panel">
         <p class="subtle" id="health-text">等待连接管理接口。</p>
@@ -377,33 +378,46 @@
       <div class="topbar">
         <div class="title-block">
           <h2 id="page-title">未选择 Session</h2>
-          <p id="page-subtitle">先在左侧输入群号，再查看 profiles / memories / dialogues。</p>
+          <p id="page-subtitle">先在左侧输入群号，再查看 memory / sticker 数据。</p>
         </div>
         <div class="status" id="status-pill">Idle</div>
       </div>
 
       <section class="panel" style="padding: 16px;">
-        <div class="tabs">
+          <div class="tabs">
           <button class="tab active" data-tab="profiles">Profiles</button>
           <button class="tab" data-tab="memories">Memories</button>
           <button class="tab" data-tab="dialogues">Dialogues</button>
+          <button class="tab" data-tab="stickers">Stickers</button>
         </div>
         <div class="toolbar" style="margin-top: 14px;">
           <div class="field">
-            <label for="user-filter">User ID</label>
+            <label for="user-filter" id="user-filter-label">User ID</label>
             <input id="user-filter" type="text" placeholder="仅 profiles 使用" />
           </div>
           <div class="field">
-            <label for="key-filter">Key / Category</label>
+            <label for="key-filter" id="key-filter-label">Key / Category</label>
             <input id="key-filter" type="text" placeholder="key 或 category" />
           </div>
           <div class="field">
-            <label for="related-filter">Related User</label>
+            <label for="related-filter" id="related-filter-label">Related User</label>
             <input id="related-filter" type="text" placeholder="memories 使用" />
           </div>
           <div class="field">
-            <label for="keyword-filter">Keyword</label>
+            <label for="keyword-filter" id="keyword-filter-label">Keyword</label>
             <input id="keyword-filter" type="text" placeholder="memories 使用" />
+          </div>
+          <div class="field">
+            <label for="scene-filter" id="scene-filter-label">Scene Tag</label>
+            <input id="scene-filter" type="text" placeholder="stickers 使用" />
+          </div>
+          <div class="field">
+            <label for="enabled-filter" id="enabled-filter-label">Enabled</label>
+            <select id="enabled-filter">
+              <option value="">全部</option>
+              <option value="1">启用</option>
+              <option value="0">禁用</option>
+            </select>
           </div>
           <div class="field" style="max-width: 120px;">
             <label for="page-size">Page Size</label>
@@ -449,9 +463,9 @@
   </div>
 
   <script>
-    const BASE = "/simple-gpt/memory-admin";
+    const BASE = "/simple-gpt/admin";
     const state = {
-      token: localStorage.getItem("simple_gpt_memory_admin_token") || "",
+      token: localStorage.getItem("simple_gpt_admin_token") || "",
       tab: "profiles",
       sessionId: "",
       page: 1,
@@ -473,6 +487,12 @@
     const healthText = $("health-text");
     const pageInput = $("page-input");
     const pageSizeInput = $("page-size");
+    const userFilter = $("user-filter");
+    const keyFilter = $("key-filter");
+    const relatedFilter = $("related-filter");
+    const keywordFilter = $("keyword-filter");
+    const sceneFilter = $("scene-filter");
+    const enabledFilter = $("enabled-filter");
 
     tokenInput.value = state.token;
 
@@ -505,19 +525,26 @@
       return response.json();
     }
 
-    function renderSessions() {
+    function renderSessions(items = []) {
       sessionList.innerHTML = "";
-      if (!state.sessionId) {
-        sessionList.innerHTML = '<p class="subtle">请输入群号后进入。</p>';
+      if (!items.length && !state.sessionId) {
+        sessionList.innerHTML = '<p class="subtle">输入群号或点击“刷新最近会话”。</p>';
         return;
       }
-      const btn = document.createElement("button");
-      btn.className = "session-btn active";
-      btn.textContent = state.sessionId;
-      btn.onclick = () => {
-        loadCurrentTab();
-      };
-      sessionList.appendChild(btn);
+      items.forEach((sessionId) => {
+        const btn = document.createElement("button");
+        btn.className = "session-btn" + (sessionId === state.sessionId ? " active" : "");
+        btn.textContent = sessionId;
+        btn.onclick = () => {
+          state.sessionId = sessionId;
+          const raw = sessionId.startsWith("group_") ? sessionId.slice(6) : sessionId;
+          sessionSearch.value = raw;
+          pageTitle.textContent = state.sessionId;
+          pageSubtitle.textContent = "当前正在查看该群的存储与调试记录。";
+          loadCurrentTab();
+        };
+        sessionList.appendChild(btn);
+      });
     }
 
     function renderList() {
@@ -543,19 +570,25 @@
           ? `${item.key} = ${item.value}`
           : state.tab === "memories"
             ? item.content
-            : `${item.sender} · ${item.created_at}`;
+            : state.tab === "dialogues"
+              ? `${item.sender} · ${item.created_at}`
+              : item.description;
 
         const meta = state.tab === "profiles"
           ? `${item.user_id} · ${item.session_id}`
           : state.tab === "memories"
             ? `${item.category} · ${item.related_user_id || "group"}`
-            : `${item.session_id} · ${item.sender_user_id}`;
+            : state.tab === "dialogues"
+              ? `${item.session_id} · ${item.sender_user_id}`
+              : `${item.session_id} · ${item.enabled ? "enabled" : "disabled"}`;
 
         const snippet = state.tab === "dialogues"
           ? item.latest_message
           : state.tab === "profiles"
             ? `${item.updated_at}`
-            : `${item.speaker || "unknown"} · ${item.created_at}`;
+            : state.tab === "memories"
+              ? `${item.speaker || "unknown"} · ${item.created_at}`
+              : `${item.emotion_tags || "-"} ｜ ${item.intent_tags || "-"} ｜ ${item.scene_tags || "-"}`;
 
         el.innerHTML = `
           <div class="item-header">
@@ -586,7 +619,9 @@
         ? `dialogue #${item.id}`
         : state.tab === "memories"
           ? item.id || "memory"
-          : `${item.user_id} / ${item.key}`;
+          : state.tab === "profiles"
+            ? `${item.user_id} / ${item.key}`
+            : `sticker ${item.id}`;
 
       if (state.tab === "profiles") {
         detailView.appendChild(renderJsonBlock("Profile", item));
@@ -595,6 +630,11 @@
 
       if (state.tab === "memories") {
         detailView.appendChild(renderJsonBlock("Memory", item));
+        return;
+      }
+
+      if (state.tab === "stickers") {
+        renderStickerDetail(item);
         return;
       }
 
@@ -616,6 +656,42 @@
       }
     }
 
+    function renderStickerDetail(data) {
+      detailView.innerHTML = "";
+      const imgBlock = document.createElement("div");
+      imgBlock.className = "detail-block";
+      imgBlock.innerHTML = `<h4>Preview</h4><img alt="sticker preview" style="max-width: 100%; border-radius: 12px; display: block;" />`;
+      imgBlock.querySelector("img").src = `${BASE}/sticker/items/${data.id}/image`;
+      detailView.appendChild(imgBlock);
+
+      const actionBlock = document.createElement("div");
+      actionBlock.className = "detail-block";
+      actionBlock.innerHTML = `<h4>Action</h4><button id="delete-sticker-btn">删除这个表情</button>`;
+      actionBlock.querySelector("button").onclick = async () => {
+        if (!confirm("确认删除这个表情吗？")) {
+          return;
+        }
+        setStatus("Deleting sticker...");
+        try {
+          const response = await fetch(`${window.location.origin}${BASE}/sticker/items/${data.id}`, {
+            method: "DELETE",
+            headers: getHeaders(),
+          });
+          if (!response.ok) {
+            throw new Error(await response.text());
+          }
+          setStatus("Sticker deleted");
+          await loadCurrentTab();
+        } catch (error) {
+          detailView.appendChild(renderJsonBlock("Delete Error", String(error)));
+          setStatus("Sticker delete failed", true);
+        }
+      };
+      detailView.appendChild(actionBlock);
+
+      detailView.appendChild(renderJsonBlock("Sticker", data));
+    }
+
     function renderDialogueDetail(data) {
       detailView.innerHTML = "";
       detailView.appendChild(renderJsonBlock("Latest Message", data.latest_message));
@@ -633,10 +709,29 @@
         const res = await request("/health");
         const data = res.data;
         healthText.textContent =
-          `memory=${data.enabled} · admin=${data.admin_enabled} · debug=${data.debug_enabled}`;
+          `memory=${data.memory.enabled} · admin=${data.memory.admin_enabled} · debug=${data.memory.debug_enabled} · sticker=${data.sticker.enabled}`;
       } catch (error) {
         healthText.textContent = `接口不可用: ${String(error)}`;
       }
+    }
+
+    async function loadSessions() {
+      try {
+        const res = await request("/sessions", { limit: 30 });
+        renderSessions(res.data.items || []);
+      } catch (error) {
+        renderSessions([]);
+      }
+    }
+
+    function syncFilterHints() {
+      const tab = state.tab;
+      $("user-filter-label").textContent = tab === "profiles" ? "User ID" : "User / Emotion";
+      $("key-filter-label").textContent = tab === "profiles" ? "Key" : tab === "memories" ? "Category" : "Emotion Tag";
+      $("related-filter-label").textContent = tab === "memories" ? "Related User" : "Intent Tag";
+      $("keyword-filter-label").textContent = tab === "stickers" ? "Keyword" : "Keyword";
+      $("scene-filter-label").textContent = "Scene Tag";
+      $("enabled-filter-label").textContent = "Enabled";
     }
 
     async function loadCurrentTab() {
@@ -663,18 +758,27 @@
 
       let path = "/profiles";
       if (state.tab === "profiles") {
+        path = "/memory/profiles";
         params.session_id = state.sessionId;
-        params.user_id = $("user-filter").value.trim();
-        params.key = $("key-filter").value.trim();
+        params.user_id = userFilter.value.trim();
+        params.key = keyFilter.value.trim();
       } else if (state.tab === "memories") {
-        path = "/memories";
+        path = "/memory/memories";
         params.session_id = state.sessionId;
-        params.category = $("key-filter").value.trim();
-        params.related_user_id = $("related-filter").value.trim();
-        params.keyword = $("keyword-filter").value.trim();
+        params.category = keyFilter.value.trim();
+        params.related_user_id = relatedFilter.value.trim();
+        params.keyword = keywordFilter.value.trim();
+      } else if (state.tab === "dialogues") {
+        path = "/memory/dialogues";
+        params.session_id = state.sessionId;
       } else {
-        path = "/dialogues";
+        path = "/sticker/items";
         params.session_id = state.sessionId;
+        params.keyword = keywordFilter.value.trim();
+        params.emotion_tag = keyFilter.value.trim();
+        params.intent_tag = relatedFilter.value.trim();
+        params.scene_tag = sceneFilter.value.trim();
+        params.enabled = enabledFilter.value.trim();
       }
 
       setStatus(`Loading ${state.tab}...`);
@@ -699,14 +803,16 @@
         state.tab = btn.dataset.tab;
         state.page = 1;
         pageInput.value = "1";
+        syncFilterHints();
         loadCurrentTab();
       });
     });
 
     $("save-token").onclick = async () => {
       state.token = tokenInput.value.trim();
-      localStorage.setItem("simple_gpt_memory_admin_token", state.token);
+      localStorage.setItem("simple_gpt_admin_token", state.token);
       await loadHealth();
+      await loadSessions();
       if (state.sessionId) {
         await loadCurrentTab();
       }
@@ -720,7 +826,7 @@
         state.selectedId = null;
         pageTitle.textContent = "未选择 Session";
         pageSubtitle.textContent = "先在左侧输入群号，再查看 profiles / memories / dialogues。";
-        renderSessions();
+        renderSessions([]);
         renderList();
         detailView.innerHTML = '<div class="detail-block"><h4>Hint</h4><pre>输入群号后会在这里显示详细内容。</pre></div>';
         $("detail-meta").textContent = "未选择项目";
@@ -735,9 +841,10 @@
       pageInput.value = "1";
       pageTitle.textContent = state.sessionId;
       pageSubtitle.textContent = "当前正在查看该群的存储与调试记录。";
-      renderSessions();
+      loadSessions();
       loadCurrentTab();
     };
+    $("refresh-sessions").onclick = loadSessions;
     $("apply-filters").onclick = loadCurrentTab;
     sessionSearch.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -746,7 +853,8 @@
     });
 
     loadHealth();
-    renderSessions();
+    syncFilterHints();
+    loadSessions();
   </script>
 </body>
 </html>

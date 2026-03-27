@@ -26,6 +26,7 @@ class LLMResponsePayload:
 
     content: str
     request: LLMRequestPayload
+    post_messages: List[Any] = field(default_factory=list)
     extra: Dict[str, Any] = field(default_factory=dict)
 
 

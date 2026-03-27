@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+import asyncio
+import os
+from typing import Any, Dict, List
+
+import pyarrow as pa
+from nonebot.log import logger
+
+
+class StickerVectorStore:
+    """LanceDB vector store for sticker retrieval."""
+
+    def __init__(self, db_path: str, embedding_dim: int) -> None:
+        self._db_path = os.path.join(db_path, "sticker_lancedb")
+        self._embedding_dim = embedding_dim
+        self._db: Any = None
+        self._table: Any = None
+
+    def _ensure_connection(self) -> Any:
+        if self._table is not None:
+            return self._table
+
+        import lancedb
+
+        os.makedirs(self._db_path, exist_ok=True)
+        self._db = lancedb.connect(self._db_path)
+        schema = pa.schema(
+            [
+                pa.field("id", pa.utf8()),
+                pa.field("session_id", pa.utf8()),
+                pa.field("description", pa.utf8()),
+                pa.field("emotion_tags", pa.utf8()),
+                pa.field("intent_tags", pa.utf8()),
+                pa.field("scene_tags", pa.utf8()),
+                pa.field("usage_notes", pa.utf8()),
+                pa.field("aliases", pa.utf8()),
+                pa.field("file_path", pa.utf8()),
+                pa.field("semantic_vector", pa.list_(pa.float32(), self._embedding_dim)),
+                pa.field("tag_vector", pa.list_(pa.float32(), self._embedding_dim)),
+            ]
+        )
+
+        try:
+            self._table = self._db.open_table("stickers")
+        except Exception:
+            self._table = self._db.create_table("stickers", schema=schema)
+
+        logger.debug("simple-gpt: sticker vector store 已初始化")
+        return self._table
+
+    async def add(
+        self,
+        *,
+        sticker_id: str,
+        session_id: str,
+        description: str,
+        emotion_tags: List[str],
+        intent_tags: List[str],
+        scene_tags: List[str],
+        usage_notes: str,
+        aliases: List[str],
+        file_path: str,
+        semantic_vector: List[float],
+        tag_vector: List[float],
+    ) -> None:
+        def _do() -> None:
+            table = self._ensure_connection()
+            table.add(
+                [
+                    {
+                        "id": sticker_id,
+                        "session_id": session_id,
+                        "description": description,
+                        "emotion_tags": ",".join(emotion_tags),
+                        "intent_tags": ",".join(intent_tags),
+                        "scene_tags": ",".join(scene_tags),
+                        "usage_notes": usage_notes,
+                        "aliases": ",".join(aliases),
+                        "file_path": file_path,
+                        "semantic_vector": semantic_vector,
+                        "tag_vector": tag_vector,
+                    }
+                ]
+            )
+
+        await asyncio.to_thread(_do)
+
+    async def search(
+        self,
+        *,
+        session_id: str,
+        query_vector: List[float],
+        vector_column: str,
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        def _do() -> List[Dict[str, Any]]:
+            table = self._ensure_connection()
+            try:
+                results = (
+                    table.search(query_vector, vector_column=vector_column)
+                    .where(f"session_id = '{session_id}'")
+                    .metric("cosine")
+                    .limit(top_k)
+                    .to_pandas()
+                )
+            except Exception as exc:
+                logger.debug(f"simple-gpt: sticker 向量搜索失败: {exc}")
+                return []
+
+            rows: List[Dict[str, Any]] = []
+            for _, row in results.iterrows():
+                distance = float(row.get("_distance", 1.0))
+                rows.append(
+                    {
+                        "id": row["id"],
+                        "session_id": row["session_id"],
+                        "description": row["description"],
+                        "emotion_tags": row["emotion_tags"],
+                        "intent_tags": row["intent_tags"],
+                        "scene_tags": row["scene_tags"],
+                        "usage_notes": row["usage_notes"],
+                        "aliases": row["aliases"],
+                        "file_path": row["file_path"],
+                        "similarity": 1.0 - distance,
+                    }
+                )
+            return rows
+
+        return await asyncio.to_thread(_do)
+
+    async def delete(self, sticker_id: str) -> None:
+        def _do() -> None:
+            table = self._ensure_connection()
+            try:
+                table.delete(f"id = '{sticker_id}'")
+            except Exception as exc:
+                logger.debug(f"simple-gpt: sticker 向量删除失败: {exc}")
+
+        await asyncio.to_thread(_do)
