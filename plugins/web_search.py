@@ -69,6 +69,14 @@ SEARCH_SYSTEM_PROMPT = """
 """
 
 
+_EXTRA_KEYS_EXCLUDED_FROM_CONTEXT = {
+    "web_search_result",
+    "web_search_query",
+    "hindsight_memory_block",
+    "hindsight_memories",
+}
+
+
 class SearchDecision(BaseModel):
     """搜索决策数据结构"""
 
@@ -162,8 +170,14 @@ class WebSearchPlugin(SimpleGPTPlugin):
             search_result = await self._search_answer(search_query)
 
             if search_result:
-                # 将搜索结果添加到 prompt 底部
-                search_context = f"\n\n这是用来参考的搜索结果：{search_result}"
+                # 将搜索结果添加到 prompt 底部。用明确边界避免最终模型忽略或
+                # 误把搜索结果当成聊天历史/用户原话。
+                search_context = (
+                    "\n\n## 联网搜索结果\n"
+                    "以下内容是搜索插件为本轮回答补充的参考资料，请在回答时优先参考；"
+                    "若与长期记忆或聊天上下文冲突，请按时效性和问题意图判断。\n"
+                    f"{search_result.strip()}\n"
+                )
                 payload.prompt = payload.prompt + search_context
 
                 # 将搜索结果也保存到 extra 中供其他插件使用
@@ -198,11 +212,19 @@ class WebSearchPlugin(SimpleGPTPlugin):
         """
         context_parts = []
 
+        # 优先添加 Hindsight 长期记忆。memory 插件会在更高 priority
+        # 阶段写入这些 extra 字段；搜索决策必须能看到这些记忆，避免在
+        # “记忆里已有足够线索/搜索词需要依赖记忆”时误判。
+        memory_block = self._format_hindsight_memories(extra)
+        if memory_block:
+            context_parts.append(memory_block)
+            context_parts.append("")
+
         # 添加已知的上下文信息（来自其他插件）
         if extra:
             extra_info_parts = []
             for key, value in extra.items():
-                if key not in ["web_search_result", "web_search_query"]:
+                if key not in _EXTRA_KEYS_EXCLUDED_FROM_CONTEXT:
                     extra_info_parts.append(f"{key}: {value}")
 
             # 如果有其他已知信息，可以在这里添加
@@ -212,6 +234,8 @@ class WebSearchPlugin(SimpleGPTPlugin):
                 context_parts.append("[已知信息]")
                 context_parts.extend(extra_info_parts)
                 context_parts.append("")  # 空行分隔
+
+        prelude_end = len(context_parts)
 
         # 构造对话历史
         if history:
@@ -226,21 +250,41 @@ class WebSearchPlugin(SimpleGPTPlugin):
         # 注意：已知信息部分始终保留
         max_history_entries = 10
 
-        # 找到已知信息的结束位置
-        extra_info_end = 0
-        for i, part in enumerate(context_parts):
-            if part == "":  # 找到分隔空行
-                extra_info_end = i + 1
-                break
-
         # 如果对话历史过长，只保留最近的条目
-        if len(context_parts) > extra_info_end + max_history_entries:
+        if len(context_parts) > prelude_end + max_history_entries:
             context_parts = (
-                context_parts[:extra_info_end]
+                context_parts[:prelude_end]
                 + context_parts[-(max_history_entries):]
             )
 
         return "\n".join(context_parts)
+
+    def _format_hindsight_memories(self, extra: Dict[str, Any]) -> str:
+        """把 Hindsight memory 插件提供的记忆整理进搜索判断上下文。"""
+        raw_block = extra.get("hindsight_memory_block")
+        if isinstance(raw_block, str) and raw_block.strip():
+            return raw_block.strip()
+
+        memories = extra.get("hindsight_memories")
+        if not isinstance(memories, list) or not memories:
+            return ""
+
+        lines = ["[长期记忆]"]
+        for item in memories:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            fact_type = str(item.get("type") or "").strip()
+            tag = f"[{fact_type}] " if fact_type else ""
+            lines.append(f"- {tag}{text}")
+
+        if len(lines) == 1:
+            return ""
+
+        lines.append("[记忆结束]")
+        return "\n".join(lines)
 
     async def _check_search_needed(self, context: str, question: str) -> dict:
         """判断是否需要搜索，并返回搜索内容

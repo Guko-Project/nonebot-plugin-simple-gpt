@@ -61,6 +61,10 @@ bank_id 由 `session_id` 与 `simple_gpt_hindsight_bank_scope` 共同决定：
 | `simple_gpt_hindsight_bank_scope` | str | `chat` | `chat`（按对话分）或 `global`（合并） |
 | `simple_gpt_hindsight_recall_max_tokens` | int | `1500` | 单次 recall token 预算 |
 | `simple_gpt_hindsight_recall_budget` | str | `mid` | `low` / `mid` / `high` |
+| `simple_gpt_hindsight_recall_check_enabled` | bool | `true` | recall 前先用 LLM 判断是否需要检索长期记忆 |
+| `simple_gpt_hindsight_recall_check_api_key` | str | `""` | 记忆检索判断 API Key，留空使用主配置 |
+| `simple_gpt_hindsight_recall_check_base_url` | str | `""` | 记忆检索判断 API Base URL，留空使用主配置 |
+| `simple_gpt_hindsight_recall_check_model` | str | `""` | 记忆检索判断模型，留空使用主模型 |
 | `simple_gpt_hindsight_retain_async` | bool | `true` | Hindsight 服务端异步处理 retain |
 | `simple_gpt_hindsight_timeout` | float | `30.0` | HTTP 超时（秒） |
 

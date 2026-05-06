@@ -86,6 +86,10 @@ STICKER_DECIDE_PROMPT = f"""你是一个群聊表情包选择助手。给定最�
 def _parse_json_response(text: str) -> Dict[str, Any]:
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
     raw = match.group(1).strip() if match else text.strip()
+    logger.debug(
+        "simple-gpt: sticker LLM JSON 解析 "
+        f"(raw_len={len(raw)}, fenced={match is not None}, preview={raw[:200]!r})"
+    )
     return json.loads(raw)
 
 
@@ -112,6 +116,11 @@ class StickerExtractor:
         self._timeout = timeout
 
     async def analyze_sticker(self, image_data_url: str) -> Dict[str, Any]:
+        logger.debug(
+            "simple-gpt: sticker 识别请求开始 "
+            f"(model={self._model}, base_url={self._api_base}, "
+            f"image_data_url_len={len(image_data_url)})"
+        )
         try:
             async with AsyncOpenAI(
                 api_key=self._api_key,
@@ -132,12 +141,16 @@ class StickerExtractor:
                     ],
                 )
             content = completion.choices[0].message.content or ""
+            logger.debug(
+                "simple-gpt: sticker 识别响应收到 "
+                f"(content_len={len(content)}, preview={content[:200]!r})"
+            )
             result = _parse_json_response(content)
         except Exception as exc:
             logger.warning(f"simple-gpt: sticker 识别失败: {exc}")
             return {}
 
-        return {
+        cleaned = {
             "description": str(result.get("description", "")).strip(),
             "emotion_tags": _clean_enum_list(result.get("emotion_tags", []), "emotion_tags"),
             "intent_tags": _clean_enum_list(result.get("intent_tags", []), "intent_tags"),
@@ -146,6 +159,8 @@ class StickerExtractor:
             "usage_notes": str(result.get("usage_notes", "")).strip(),
             "aliases": _clean_text_list(result.get("aliases", [])),
         }
+        logger.debug(f"simple-gpt: sticker 识别清洗完成 {cleaned}")
+        return cleaned
 
     async def decide_sticker(
         self,
@@ -161,6 +176,12 @@ class StickerExtractor:
         history_lines.append(f"用户最新消息: {latest_message}")
         history_lines.append(f"助手最终回复: {bot_reply}")
         prompt = "\n".join(history_lines)
+        logger.debug(
+            "simple-gpt: sticker 发送决策请求开始 "
+            f"(model={self._model}, base_url={self._api_base}, "
+            f"history_entries={len(history)}, prompt_len={len(prompt)}, "
+            f"latest_len={len(latest_message)}, reply_len={len(bot_reply)})"
+        )
 
         try:
             async with AsyncOpenAI(
@@ -176,6 +197,10 @@ class StickerExtractor:
                     ],
                 )
             content = completion.choices[0].message.content or ""
+            logger.debug(
+                "simple-gpt: sticker 发送决策响应收到 "
+                f"(content_len={len(content)}, preview={content[:200]!r})"
+            )
             result = _parse_json_response(content)
         except Exception as exc:
             logger.warning(f"simple-gpt: sticker 决策失败: {exc}")
@@ -188,7 +213,7 @@ class StickerExtractor:
                 "negative_tags": [],
             }
 
-        return {
+        cleaned = {
             "should_send": bool(result.get("should_send", False)),
             "query_text": str(result.get("query_text", "")).strip(),
             "emotion_tags": _clean_enum_list(result.get("emotion_tags", []), "emotion_tags"),
@@ -196,11 +221,20 @@ class StickerExtractor:
             "scene_tags": _clean_enum_list(result.get("scene_tags", []), "scene_tags"),
             "negative_tags": _clean_text_list(result.get("negative_tags", [])),
         }
+        logger.debug(f"simple-gpt: sticker 发送决策清洗完成 {cleaned}")
+        return cleaned
 
     async def generate_embedding(self, text: str) -> List[float]:
         if not text.strip():
+            logger.debug("simple-gpt: sticker embedding 跳过：输入为空")
             return []
 
+        logger.debug(
+            "simple-gpt: sticker embedding 请求开始 "
+            f"(model={self._embedding_model}, base_url={self._embedding_api_base}, "
+            f"dimensions={self._embedding_dimensions}, text_len={len(text)}, "
+            f"preview={text[:120]!r})"
+        )
         try:
             async with AsyncOpenAI(
                 api_key=self._embedding_api_key,
@@ -212,7 +246,12 @@ class StickerExtractor:
                     input=text,
                     dimensions=self._embedding_dimensions,
                 )
-                return response.data[0].embedding
+                embedding = response.data[0].embedding
+                logger.debug(
+                    "simple-gpt: sticker embedding 响应完成 "
+                    f"(dim={len(embedding)})"
+                )
+                return embedding
         except Exception as exc:
             logger.warning(f"simple-gpt: sticker embedding 生成失败: {exc}")
             return []
@@ -237,7 +276,15 @@ def _clean_text_list(value: Any) -> List[str]:
 def _clean_enum_list(value: Any, field_name: str) -> List[str]:
     allowed = set(TAG_ENUMS[field_name])
     result: List[str] = []
+    dropped: List[str] = []
     for item in _clean_text_list(value):
         if item in allowed and item not in result:
             result.append(item)
+        elif item not in allowed:
+            dropped.append(item)
+    if dropped:
+        logger.debug(
+            "simple-gpt: sticker 标签清洗丢弃非枚举值 "
+            f"(field={field_name}, dropped={dropped})"
+        )
     return result

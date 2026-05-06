@@ -149,7 +149,7 @@ async def arecall(
     tags: Sequence[str] = (),
     tags_match: str = "any",
     types: Sequence[str] = ("world", "experience", "observation"),
-    max_tokens: int = 1500,
+    max_tokens: int = 2000,
     budget: str = "mid",
 ) -> List[Dict[str, Any]]:
     """读取相关记忆。返回 dict 列表（text/type/tags/context/...）。失败返回 []。"""
@@ -160,6 +160,7 @@ async def arecall(
     if not bank_id or not query:
         return []
     try:
+        logger.info(f"simple-gpt: hindsight recall 开始 bank={bank_id} query={query}, tags={tags}, tags_match={tags_match}, types={types}, max_tokens={max_tokens}, budget={budget}")
         resp = await client.arecall(
             bank_id=bank_id,
             query=query,

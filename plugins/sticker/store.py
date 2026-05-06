@@ -22,6 +22,7 @@ class StickerStore:
             return self._conn
 
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        logger.debug(f"simple-gpt: sticker store 初始化开始 (db_path={self._db_path})")
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(
@@ -75,7 +76,16 @@ class StickerStore:
                 (session_id, sha256, phash),
             ).fetchone()
             if not row:
+                logger.debug(
+                    "simple-gpt: sticker 查重完成：无重复 "
+                    f"(session={session_id}, sha256={sha256[:12]}..., phash={phash})"
+                )
                 return None
+            logger.debug(
+                "simple-gpt: sticker 查重完成：命中重复 "
+                f"(session={session_id}, sticker_id={row[0]}, sha256={row[2][:12]}..., "
+                f"phash={row[3]})"
+            )
             return {
                 "id": row[0],
                 "file_path": row[1],
@@ -133,6 +143,12 @@ class StickerStore:
                 ),
             )
             conn.commit()
+            logger.debug(
+                "simple-gpt: sticker 元数据写入完成 "
+                f"(session={session_id}, sticker_id={sticker_id}, file_path={file_path}, "
+                f"emotion_tags={emotion_tags}, intent_tags={intent_tags}, "
+                f"scene_tags={scene_tags}, aliases={aliases})"
+            )
             return {
                 "id": sticker_id,
                 "session_id": session_id,
@@ -164,7 +180,12 @@ class StickerStore:
                 """,
                 (session_id,),
             ).fetchone()
-            return int(row[0]) if row else 0
+            count = int(row[0]) if row else 0
+            logger.debug(
+                "simple-gpt: sticker 可用数量查询完成 "
+                f"(session={session_id}, count={count})"
+            )
+            return count
 
         return await asyncio.to_thread(_do)
 
@@ -181,7 +202,12 @@ class StickerStore:
                 """,
                 (limit,),
             )
-            return [row[0] for row in cursor.fetchall()]
+            sessions = [row[0] for row in cursor.fetchall()]
+            logger.debug(
+                "simple-gpt: sticker 会话列表查询完成 "
+                f"(limit={limit}, count={len(sessions)})"
+            )
+            return sessions
 
         return await asyncio.to_thread(_do)
 
@@ -266,6 +292,12 @@ class StickerStore:
                 }
                 for row in cursor.fetchall()
             ]
+            logger.debug(
+                "simple-gpt: sticker 列表查询完成 "
+                f"(session={session_id!r}, keyword={keyword!r}, emotion_tag={emotion_tag!r}, "
+                f"intent_tag={intent_tag!r}, scene_tag={scene_tag!r}, enabled={enabled!r}, "
+                f"page={page}, page_size={page_size}, total={total}, items={len(items)})"
+            )
             return {"items": items, "total": total}
 
         return await asyncio.to_thread(_do)
@@ -286,7 +318,9 @@ class StickerStore:
                 (sticker_id,),
             ).fetchone()
             if row is None:
+                logger.debug(f"simple-gpt: sticker 详情查询未命中 (sticker_id={sticker_id})")
                 return None
+            logger.debug(f"simple-gpt: sticker 详情查询命中 (sticker_id={sticker_id})")
             return {
                 "id": row[0],
                 "session_id": row[1],
@@ -320,9 +354,14 @@ class StickerStore:
                 (sticker_id,),
             ).fetchone()
             if row is None:
+                logger.debug(f"simple-gpt: sticker 删除元数据未命中 (sticker_id={sticker_id})")
                 return None
             conn.execute("DELETE FROM stickers WHERE id = ?", (sticker_id,))
             conn.commit()
+            logger.debug(
+                "simple-gpt: sticker 删除元数据完成 "
+                f"(sticker_id={row[0]}, file_path={row[1]})"
+            )
             return {"id": row[0], "file_path": row[1]}
 
         return await asyncio.to_thread(_do)
@@ -331,3 +370,4 @@ class StickerStore:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+            logger.debug("simple-gpt: sticker store 连接已关闭")

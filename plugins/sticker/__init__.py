@@ -63,43 +63,43 @@ register_plugin_config_field(
     "simple_gpt_sticker_extract_api_key",
     str,
     default="",
-    description="表情包识别 LLM API Key（留空则回退到 memory，再回退到主 API Key）",
+    description="表情包识别 LLM API Key（留空则回退到主 API Key）",
 )
 register_plugin_config_field(
     "simple_gpt_sticker_extract_api_base",
     str,
     default="https://api.openai.com/v1",
-    description="表情包识别 LLM API Base URL（留空则回退到 memory，再回退到主 API Base URL）",
+    description="表情包识别 LLM API Base URL（留空则回退到主 API Base URL）",
 )
 register_plugin_config_field(
     "simple_gpt_sticker_extract_model",
     str,
     default="gemini-3.1-flash-lite-preview",
-    description="表情包识别模型（留空则回退到 memory，再回退到主模型）",
+    description="表情包识别模型（留空则回退到主模型）",
 )
 register_plugin_config_field(
     "simple_gpt_sticker_embedding_api_key",
     str,
     default="",
-    description="表情包 Embedding API Key（留空则回退到 memory，再回退到主 API Key）",
+    description="表情包 Embedding API Key（留空则回退到主 API Key）",
 )
 register_plugin_config_field(
     "simple_gpt_sticker_embedding_api_base",
     str,
     default="https://api.openai.com/v1",
-    description="表情包 Embedding API Base URL（留空则回退到 memory，再回退到主 API Base URL）",
+    description="表情包 Embedding API Base URL（留空则回退到主 API Base URL）",
 )
 register_plugin_config_field(
     "simple_gpt_sticker_embedding_model",
     str,
     default="text-embedding-3-small",
-    description="表情包 Embedding 模型（留空则回退到 memory 默认值）",
+    description="表情包 Embedding 模型（留空则回退到默认值）",
 )
 register_plugin_config_field(
     "simple_gpt_sticker_embedding_dimensions",
     int,
     default=512,
-    description="表情包 Embedding 维度（<=0 时回退到 memory 默认值）",
+    description="表情包 Embedding 维度（<=0 时回退到默认值）",
     ge=0,
     le=4096,
 )
@@ -107,7 +107,7 @@ register_plugin_config_field(
 IMAGE_DIR = "images"
 SAVE_COMMAND = "记忆表情"
 SAVE_COMMAND_ALIASES = {"memo_sticker"}
-SEND_PROBABILITY = 0.4
+SEND_PROBABILITY = 1
 SEMANTIC_TOP_K = 8
 TAG_TOP_K = 8
 MAX_CANDIDATES = 10
@@ -163,17 +163,14 @@ def _resolve_sticker_setting(
     env_name: str,
     sticker_value: Any,
     sticker_default: Any,
-    memory_value: Any,
     main_value: Any,
 ) -> Any:
-    """Prefer explicitly configured sticker values; otherwise fall back to memory/main."""
+    """Prefer explicitly configured sticker values; otherwise fall back to main."""
 
     if os.getenv(env_name) not in (None, ""):
         return sticker_value
     if sticker_value != sticker_default and sticker_value not in ("", 0, None):
         return sticker_value
-    if memory_value not in ("", 0, None):
-        return memory_value
     return main_value
 
 
@@ -196,55 +193,52 @@ class StickerPlugin(SimpleGPTPlugin):
         config = _get_plugin_config()
         db_path = config.simple_gpt_sticker_db_path
         image_dir = os.path.join(db_path, IMAGE_DIR)
+        logger.debug(
+            "simple-gpt: sticker 初始化开始 "
+            f"(db_path={db_path}, image_dir={image_dir})"
+        )
         os.makedirs(image_dir, exist_ok=True)
 
         extract_api_key = _resolve_sticker_setting(
             env_name="SIMPLE_GPT_STICKER_EXTRACT_API_KEY",
             sticker_value=config.simple_gpt_sticker_extract_api_key,
             sticker_default="",
-            memory_value=config.simple_gpt_memory_extract_api_key,
             main_value=config.simple_gpt_api_key,
         )
         extract_api_base = _resolve_sticker_setting(
             env_name="SIMPLE_GPT_STICKER_EXTRACT_API_BASE",
             sticker_value=config.simple_gpt_sticker_extract_api_base,
             sticker_default="https://api.openai.com/v1",
-            memory_value=config.simple_gpt_memory_extract_api_base,
             main_value=config.simple_gpt_api_base,
         )
         extract_model = _resolve_sticker_setting(
             env_name="SIMPLE_GPT_STICKER_EXTRACT_MODEL",
             sticker_value=config.simple_gpt_sticker_extract_model,
             sticker_default="gemini-3.1-flash-lite-preview",
-            memory_value=config.simple_gpt_memory_extract_model,
             main_value=config.simple_gpt_model,
         )
         embedding_api_key = _resolve_sticker_setting(
             env_name="SIMPLE_GPT_STICKER_EMBEDDING_API_KEY",
             sticker_value=config.simple_gpt_sticker_embedding_api_key,
             sticker_default="",
-            memory_value=config.simple_gpt_memory_embedding_api_key,
             main_value=config.simple_gpt_api_key,
         )
         embedding_api_base = _resolve_sticker_setting(
             env_name="SIMPLE_GPT_STICKER_EMBEDDING_API_BASE",
             sticker_value=config.simple_gpt_sticker_embedding_api_base,
             sticker_default="https://api.openai.com/v1",
-            memory_value=config.simple_gpt_memory_embedding_api_base,
             main_value=config.simple_gpt_api_base,
         )
         embedding_model = _resolve_sticker_setting(
             env_name="SIMPLE_GPT_STICKER_EMBEDDING_MODEL",
             sticker_value=config.simple_gpt_sticker_embedding_model,
             sticker_default="text-embedding-3-small",
-            memory_value=config.simple_gpt_memory_embedding_model,
             main_value="text-embedding-3-small",
         )
         embedding_dimensions = _resolve_sticker_setting(
             env_name="SIMPLE_GPT_STICKER_EMBEDDING_DIMENSIONS",
             sticker_value=config.simple_gpt_sticker_embedding_dimensions,
             sticker_default=512,
-            memory_value=config.simple_gpt_memory_embedding_dimensions,
             main_value=512,
         )
 
@@ -261,6 +255,12 @@ class StickerPlugin(SimpleGPTPlugin):
             timeout=config.simple_gpt_timeout,
         )
         self._initialized = True
+        logger.debug(
+            "simple-gpt: sticker 初始化配置 "
+            f"(extract_base={extract_api_base}, extract_model={extract_model}, "
+            f"embedding_base={embedding_api_base}, embedding_model={embedding_model}, "
+            f"embedding_dimensions={embedding_dimensions}, timeout={config.simple_gpt_timeout})"
+        )
         logger.info(
             "simple-gpt: sticker 插件已加载 "
             f"(save_command={SAVE_COMMAND}, aliases={sorted(SAVE_COMMAND_ALIASES)}, "
@@ -272,7 +272,20 @@ class StickerPlugin(SimpleGPTPlugin):
     ) -> LLMResponsePayload:
         self._ensure_initialized()
         session_id = payload.request.extra.get("session_id", "")
-        if not session_id or random.random() >= SEND_PROBABILITY:
+        logger.debug(
+            "simple-gpt: sticker 发送链路开始 "
+            f"(session={session_id!r}, reply_len={len(payload.content)}, "
+            f"history_len={len(payload.request.history)})"
+        )
+        if not session_id:
+            logger.debug("simple-gpt: sticker 跳过发送：缺少 session_id")
+            return payload
+        random_value = random.random()
+        if random_value >= SEND_PROBABILITY:
+            logger.debug(
+                "simple-gpt: sticker 跳过发送：概率未命中 "
+                f"(random={random_value:.4f}, probability={SEND_PROBABILITY})"
+            )
             return payload
 
         assert self._store is not None
@@ -281,18 +294,29 @@ class StickerPlugin(SimpleGPTPlugin):
 
         sticker_count = await self._store.count_enabled(session_id)
         if sticker_count <= 0:
+            logger.debug(
+                "simple-gpt: sticker 跳过发送：当前会话无可用表情 "
+                f"(session={session_id}, enabled_count={sticker_count})"
+            )
             return payload
+        logger.debug(
+            "simple-gpt: sticker 可用表情计数完成 "
+            f"(session={session_id}, enabled_count={sticker_count})"
+        )
 
         decision = await self._extractor.decide_sticker(
             history=payload.request.history,
             latest_message=payload.request.latest_message,
             bot_reply=payload.content,
         )
+        logger.debug(f"simple-gpt: sticker 发送决策结果 {decision}")
         if not decision.get("should_send"):
+            logger.debug("simple-gpt: sticker 跳过发送：LLM 判定不发送")
             return payload
 
         candidate = await self._pick_best_sticker(session_id, decision)
         if candidate is None:
+            logger.debug("simple-gpt: sticker 跳过发送：没有达到阈值的候选表情")
             return payload
 
         sticker_id = candidate["id"]
@@ -321,8 +345,19 @@ class StickerPlugin(SimpleGPTPlugin):
 
         semantic_query = query_text or " ".join(emotion_tags + intent_tags + scene_tags)
         tag_query = " ".join(emotion_tags + intent_tags + scene_tags)
+        logger.debug(
+            "simple-gpt: sticker 候选检索开始 "
+            f"(session={session_id}, semantic_query={semantic_query!r}, "
+            f"tag_query={tag_query!r}, emotion_tags={emotion_tags}, "
+            f"intent_tags={intent_tags}, scene_tags={scene_tags}, "
+            f"negative_tags={sorted(negative_tags)})"
+        )
         semantic_vector = await self._extractor.generate_embedding(semantic_query)
         tag_vector = await self._extractor.generate_embedding(tag_query)
+        logger.debug(
+            "simple-gpt: sticker 查询向量生成完成 "
+            f"(semantic_dim={len(semantic_vector)}, tag_dim={len(tag_vector)})"
+        )
 
         semantic_rows: List[Dict[str, Any]] = []
         tag_rows: List[Dict[str, Any]] = []
@@ -346,6 +381,11 @@ class StickerPlugin(SimpleGPTPlugin):
             merged.setdefault(row["id"], row)["semantic_score"] = row["similarity"]
         for row in tag_rows:
             merged.setdefault(row["id"], row)["tag_vector_score"] = row["similarity"]
+        logger.debug(
+            "simple-gpt: sticker 向量候选合并完成 "
+            f"(semantic_rows={len(semantic_rows)}, tag_rows={len(tag_rows)}, "
+            f"merged={len(merged)})"
+        )
 
         expanded_tags = set(_expand_tags(emotion_tags + intent_tags + scene_tags))
         recent_sent_ids = self._recent_sent[session_id]
@@ -355,10 +395,18 @@ class StickerPlugin(SimpleGPTPlugin):
             for sticker_id, sent_at in recent_sent_ids
             if now - sent_at < COOLDOWN_SECONDS
         }
+        logger.debug(
+            "simple-gpt: sticker 近期发送冷却 "
+            f"(recent_count={len(recent_sent_ids)}, blocked={list(recent_block)})"
+        )
 
         best_candidate: Optional[Dict[str, Any]] = None
         for row in list(merged.values())[:MAX_CANDIDATES]:
             if row["id"] in recent_block:
+                logger.debug(
+                    "simple-gpt: sticker 候选跳过：冷却中 "
+                    f"(sticker_id={row['id']})"
+                )
                 continue
 
             sticker_tags = _normalize_tags(
@@ -369,6 +417,10 @@ class StickerPlugin(SimpleGPTPlugin):
             )
             expanded_sticker_tags = set(_expand_tags(sticker_tags))
             if negative_tags and negative_tags.intersection(expanded_sticker_tags):
+                logger.debug(
+                    "simple-gpt: sticker 候选跳过：命中 negative_tags "
+                    f"(sticker_id={row['id']}, sticker_tags={sticker_tags})"
+                )
                 continue
             overlap = expanded_tags.intersection(expanded_sticker_tags)
             tag_match_score = (
@@ -384,11 +436,23 @@ class StickerPlugin(SimpleGPTPlugin):
                 + tag_match_score * 0.2
             )
             row["final_score"] = final_score
+            logger.debug(
+                "simple-gpt: sticker 候选评分 "
+                f"(sticker_id={row['id']}, semantic={semantic_score:.3f}, "
+                f"tag_vector={tag_vector_score:.3f}, tag_match={tag_match_score:.3f}, "
+                f"final={final_score:.3f}, threshold={SEND_THRESHOLD})"
+            )
             if final_score < SEND_THRESHOLD:
                 continue
             if best_candidate is None or final_score > best_candidate["final_score"]:
                 best_candidate = row
 
+        if best_candidate is not None:
+            logger.debug(
+                "simple-gpt: sticker 最佳候选 "
+                f"(sticker_id={best_candidate['id']}, "
+                f"final_score={best_candidate['final_score']:.3f})"
+            )
         return best_candidate
 
     def close(self) -> None:
@@ -428,11 +492,17 @@ async def _handle_save_sticker(
     assert _plugin_instance._extractor is not None
 
     if not isinstance(event, GroupMessageEvent):
+        logger.debug("simple-gpt: sticker 保存链路跳过：非群消息事件")
         await matcher.finish()
 
     session_id = f"group_{event.group_id}"
+    logger.debug(
+        "simple-gpt: sticker 保存链路开始 "
+        f"(session={session_id}, user={event.user_id}, args={str(args)!r})"
+    )
     reply_message = _extract_reply_message(event)
     if reply_message is None:
+        logger.debug("simple-gpt: sticker 保存失败：没有回复消息")
         await matcher.finish(
             f"请回复一张表情图后再发送“{SAVE_COMMAND}”"
             f"或“{next(iter(SAVE_COMMAND_ALIASES))}”。"
@@ -447,25 +517,46 @@ async def _handle_save_sticker(
     except Exception as exc:
         logger.warning(f"simple-gpt: sticker 解析回复图片失败: {exc}")
         await matcher.finish("回复里的图片解析失败，稍后再试。")
+    logger.debug(
+        "simple-gpt: sticker 回复图片提取完成 "
+        f"(session={session_id}, image_count={len(data_urls)})"
+    )
     if not data_urls:
+        logger.debug("simple-gpt: sticker 保存失败：回复消息无图片")
         await matcher.finish("被回复消息里没有可识别的图片。")
 
     image_data_url = data_urls[0]
     image_bytes, ext = _decode_data_url(image_data_url)
     if not image_bytes:
+        logger.debug("simple-gpt: sticker 保存失败：data URL 解码为空")
         await matcher.finish("图片解析失败，暂时无法保存。")
+    logger.debug(
+        "simple-gpt: sticker 图片解码完成 "
+        f"(bytes={len(image_bytes)}, ext={ext})"
+    )
 
     sha256 = hashlib.sha256(image_bytes).hexdigest()
     phash = _compute_perceptual_hash(image_bytes)
+    logger.debug(
+        "simple-gpt: sticker 图片哈希完成 "
+        f"(sha256={sha256[:12]}..., phash={phash})"
+    )
     duplicate = await _plugin_instance._store.find_duplicate(session_id, sha256, phash)
     if duplicate:
+        logger.debug(
+            "simple-gpt: sticker 保存失败：检测到重复 "
+            f"(duplicate_id={duplicate['id']}, description={duplicate['description']!r})"
+        )
         await matcher.finish("这张表情已经记住了。")
 
     sticker_meta = await _plugin_instance._extractor.analyze_sticker(image_data_url)
+    logger.debug(f"simple-gpt: sticker 图片识别结果 {sticker_meta}")
     if not sticker_meta.get("description"):
+        logger.debug("simple-gpt: sticker 保存失败：识别结果缺少 description")
         await matcher.finish("表情识别失败，这次没有记住。")
 
     file_path = await _save_sticker_file(image_bytes, ext)
+    logger.debug(f"simple-gpt: sticker 图片文件已保存 (file_path={file_path})")
     emotion_tags = _normalize_tags(sticker_meta.get("emotion_tags", []))
     intent_tags = _normalize_tags(sticker_meta.get("intent_tags", []))
     scene_tags = _normalize_tags(sticker_meta.get("scene_tags", []))
@@ -493,7 +584,13 @@ async def _handle_save_sticker(
 
     semantic_vector = await _plugin_instance._extractor.generate_embedding(semantic_text)
     tag_vector = await _plugin_instance._extractor.generate_embedding(tag_text)
+    logger.debug(
+        "simple-gpt: sticker 保存向量生成完成 "
+        f"(semantic_text_len={len(semantic_text)}, tag_text_len={len(tag_text)}, "
+        f"semantic_dim={len(semantic_vector)}, tag_dim={len(tag_vector)})"
+    )
     if not semantic_vector or not tag_vector:
+        logger.debug("simple-gpt: sticker 保存失败：向量为空")
         await matcher.finish("向量化失败，这次没有记住。")
 
     record = await _plugin_instance._store.add(
@@ -523,6 +620,10 @@ async def _handle_save_sticker(
         semantic_vector=semantic_vector,
         tag_vector=tag_vector,
     )
+    logger.debug(
+        "simple-gpt: sticker 保存链路完成 "
+        f"(session={session_id}, sticker_id={record['id']}, file_path={file_path})"
+    )
     logger.info(
         "simple-gpt: 已保存表情 "
         f"(session={session_id}, sticker_id={record['id']}, description={description!r})"
@@ -539,9 +640,11 @@ async def _handle_save_sticker(
 def _extract_reply_message(event: MessageEvent) -> Optional[Message]:
     raw_reply = getattr(event, "reply", None)
     if not raw_reply:
+        logger.debug("simple-gpt: sticker 回复提取：event.reply 为空")
         return None
     raw_message = getattr(raw_reply, "message", None)
     if not raw_message:
+        logger.debug("simple-gpt: sticker 回复提取：reply.message 为空")
         return None
     try:
         return Message(raw_message)
@@ -554,7 +657,11 @@ async def _extract_image_data_urls_from_message(
     message: Message, *, bot: Bot, timeout: float
 ) -> List[str]:
     data_urls: List[str] = []
-    for segment in message:
+    for index, segment in enumerate(message):
+        logger.debug(
+            "simple-gpt: sticker 检查回复消息片段 "
+            f"(index={index}, type={segment.type})"
+        )
         if segment.type != "image":
             continue
         data_url = await _segment_to_data_url_with_bot(segment, bot=bot, timeout=timeout)
@@ -577,20 +684,25 @@ async def _segment_to_data_url_with_bot(
     if isinstance(file_value, str):
         filename = file_value
         if file_value.startswith("base64://"):
+            logger.debug("simple-gpt: sticker 图片来源：segment file base64")
             content = _decode_inline_base64(file_value)
         elif _looks_like_url(file_value) and not url:
+            logger.debug("simple-gpt: sticker 图片来源：segment file URL")
             url = file_value
         elif _is_local_path(file_value):
+            logger.debug(f"simple-gpt: sticker 图片来源：segment file 本地路径 ({file_value})")
             content = await _load_local_file(file_value)
 
     if content is None and isinstance(path_value, str):
         filename = path_value
+        logger.debug(f"simple-gpt: sticker 图片来源：segment path ({path_value})")
         content = await _load_local_file(path_value)
 
     if content is None and not url:
         file_id = data.get("file_id") or file_value
         if isinstance(file_id, str):
             try:
+                logger.debug(f"simple-gpt: sticker 图片来源：bot.get_image (file_id={file_id})")
                 response = await bot.get_image(file=file_id)
             except ActionFailed as exc:
                 logger.warning(f"simple-gpt: sticker 获取图片失败: {exc.info}")
@@ -599,12 +711,18 @@ async def _segment_to_data_url_with_bot(
                     url = response.get("url") or url
 
     if content is None and url:
+        logger.debug(f"simple-gpt: sticker 图片来源：下载 URL ({url})")
         content, content_type = await _download_image(url, timeout=timeout)
 
     if content is None:
+        logger.debug("simple-gpt: sticker 图片片段解析失败：未获得内容")
         return None
 
     mime = _resolve_mime(content, content_type=content_type, filename=filename)
+    logger.debug(
+        "simple-gpt: sticker 图片片段解析成功 "
+        f"(bytes={len(content)}, mime={mime}, filename={filename!r})"
+    )
     encoded = base64.b64encode(content).decode("ascii")
     return f"data:{mime};base64,{encoded}"
 
@@ -632,6 +750,7 @@ def _is_local_path(text: str) -> bool:
 async def _load_local_file(path_str: str) -> Optional[bytes]:
     path = _resolve_path(path_str)
     if path is None:
+        logger.debug(f"simple-gpt: sticker 本地图片路径无法解析: {path_str}")
         return None
     try:
         data = await asyncio.to_thread(path.read_bytes)
@@ -641,6 +760,7 @@ async def _load_local_file(path_str: str) -> Optional[bytes]:
     if len(data) > MAX_IMAGE_BYTES:
         logger.warning(f"simple-gpt: sticker 本地图片过大（{len(data)} bytes），已忽略")
         return None
+    logger.debug(f"simple-gpt: sticker 本地图片读取完成 (path={path}, bytes={len(data)})")
     return data
 
 
@@ -659,6 +779,10 @@ async def _download_image(
 ) -> Tuple[Optional[bytes], Optional[str]]:
     try:
         actual_timeout = max(timeout, IMAGE_FETCH_TIMEOUT)
+        logger.debug(
+            "simple-gpt: sticker 开始下载图片 "
+            f"(url={url}, timeout={actual_timeout})"
+        )
         async with httpx.AsyncClient(timeout=actual_timeout) as client:
             response = await client.get(url)
             response.raise_for_status()
@@ -671,6 +795,11 @@ async def _download_image(
         logger.warning(f"simple-gpt: sticker 图片过大（{len(data)} bytes），已忽略")
         return None, None
 
+    logger.debug(
+        "simple-gpt: sticker 图片下载完成 "
+        f"(url={url}, status={response.status_code}, bytes={len(data)}, "
+        f"content_type={response.headers.get('content-type')})"
+    )
     return data, response.headers.get("content-type")
 
 
@@ -695,17 +824,20 @@ async def _save_sticker_file(image_bytes: bytes, ext: str) -> str:
     file_name = f"{uuid.uuid4().hex}.{ext}"
     file_path = Path(_get_plugin_config().simple_gpt_sticker_db_path) / IMAGE_DIR / file_name
     await asyncio.to_thread(file_path.write_bytes, image_bytes)
+    logger.debug(f"simple-gpt: sticker 写入图片文件 (file_path={file_path}, bytes={len(image_bytes)})")
     return str(file_path)
 
 
 def _decode_data_url(data_url: str) -> Tuple[bytes, str]:
     match = data_url.split(",", 1)
     if len(match) != 2:
+        logger.debug("simple-gpt: sticker data URL 格式错误：缺少逗号")
         return b"", "png"
     header, payload = match
     try:
         image_bytes = base64.b64decode(payload)
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"simple-gpt: sticker data URL base64 解码失败: {exc}")
         return b"", "png"
     mime = header.replace("data:", "").replace(";base64", "")
     ext = mime.split("/")[-1] if "/" in mime else "png"
@@ -716,11 +848,20 @@ def _decode_data_url(data_url: str) -> Tuple[bytes, str]:
 
 def _compute_perceptual_hash(image_bytes: bytes) -> str:
     if Image is None:
+        logger.debug("simple-gpt: sticker Pillow 不可用，使用 md5 作为 phash")
         return hashlib.md5(image_bytes).hexdigest()
 
-    with Image.open(io.BytesIO(image_bytes)) as image:
-        gray = image.convert("L").resize((8, 8))
-        pixels = list(gray.getdata())
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            gray = image.convert("L").resize((8, 8))
+            pixels = list(gray.getdata())
+    except Exception as exc:
+        fallback = hashlib.md5(image_bytes).hexdigest()
+        logger.debug(
+            "simple-gpt: sticker phash 计算失败，回退 md5 "
+            f"(error={exc}, fallback={fallback})"
+        )
+        return fallback
     avg = sum(pixels) / len(pixels)
     bits = "".join("1" if pixel >= avg else "0" for pixel in pixels)
     return f"{int(bits, 2):016x}"

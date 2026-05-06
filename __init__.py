@@ -227,7 +227,7 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
         # 被 @ 时提高重试次数，主动发言保持默认重试次数
         max_retries = 5 if is_tome_event else 3
         if reply_needed:
-            logger.debug(f"最终 prompt: {llm_request}")
+            logger.debug(f"最终 prompt: {llm_request.prompt}")
             generated = await generate_chat_reply(
                 prompt=llm_request.prompt,
                 api_key=plugin_config.simple_gpt_api_key,

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import pyarrow as pa
 from nonebot.log import logger
+
+if TYPE_CHECKING:
+    from lancedb.db import DBConnection
+    from lancedb.table import Table
 
 
 class StickerVectorStore:
@@ -14,17 +18,23 @@ class StickerVectorStore:
     def __init__(self, db_path: str, embedding_dim: int) -> None:
         self._db_path = os.path.join(db_path, "sticker_lancedb")
         self._embedding_dim = embedding_dim
-        self._db: Any = None
-        self._table: Any = None
+        self._db: DBConnection | None = None
+        self._table: Table | None = None
 
-    def _ensure_connection(self) -> Any:
-        if self._table is not None:
-            return self._table
+    def _ensure_connection(self) -> Table:
+        table = self._table
+        if table is not None:
+            return table
 
         import lancedb
 
         os.makedirs(self._db_path, exist_ok=True)
-        self._db = lancedb.connect(self._db_path)
+        logger.debug(
+            "simple-gpt: sticker vector store 初始化开始 "
+            f"(db_path={self._db_path}, embedding_dim={self._embedding_dim})"
+        )
+        db = lancedb.connect(self._db_path)
+        self._db = db
         schema = pa.schema(
             [
                 pa.field("id", pa.utf8()),
@@ -42,12 +52,15 @@ class StickerVectorStore:
         )
 
         try:
-            self._table = self._db.open_table("stickers")
+            table = db.open_table("stickers")
+            logger.debug("simple-gpt: sticker vector table 已打开 (table=stickers)")
         except Exception:
-            self._table = self._db.create_table("stickers", schema=schema)
+            table = db.create_table("stickers", schema=schema)
+            logger.debug("simple-gpt: sticker vector table 已创建 (table=stickers)")
 
+        self._table = table
         logger.debug("simple-gpt: sticker vector store 已初始化")
-        return self._table
+        return table
 
     async def add(
         self,
@@ -66,6 +79,11 @@ class StickerVectorStore:
     ) -> None:
         def _do() -> None:
             table = self._ensure_connection()
+            logger.debug(
+                "simple-gpt: sticker 向量写入开始 "
+                f"(session={session_id}, sticker_id={sticker_id}, "
+                f"semantic_dim={len(semantic_vector)}, tag_dim={len(tag_vector)})"
+            )
             table.add(
                 [
                     {
@@ -83,6 +101,10 @@ class StickerVectorStore:
                     }
                 ]
             )
+            logger.debug(
+                "simple-gpt: sticker 向量写入完成 "
+                f"(session={session_id}, sticker_id={sticker_id})"
+            )
 
         await asyncio.to_thread(_do)
 
@@ -97,8 +119,13 @@ class StickerVectorStore:
         def _do() -> List[Dict[str, Any]]:
             table = self._ensure_connection()
             try:
+                logger.debug(
+                    "simple-gpt: sticker 向量搜索开始 "
+                    f"(session={session_id}, vector_column={vector_column}, "
+                    f"query_dim={len(query_vector)}, top_k={top_k})"
+                )
                 results = (
-                    table.search(query_vector, vector_column=vector_column)
+                    table.search(query_vector, vector_column_name=vector_column)
                     .where(f"session_id = '{session_id}'")
                     .metric("cosine")
                     .limit(top_k)
@@ -125,6 +152,11 @@ class StickerVectorStore:
                         "similarity": 1.0 - distance,
                     }
                 )
+            logger.debug(
+                "simple-gpt: sticker 向量搜索完成 "
+                f"(session={session_id}, vector_column={vector_column}, rows={len(rows)}, "
+                f"ids={[row['id'] for row in rows]})"
+            )
             return rows
 
         return await asyncio.to_thread(_do)
@@ -133,7 +165,9 @@ class StickerVectorStore:
         def _do() -> None:
             table = self._ensure_connection()
             try:
+                logger.debug(f"simple-gpt: sticker 向量删除开始 (sticker_id={sticker_id})")
                 table.delete(f"id = '{sticker_id}'")
+                logger.debug(f"simple-gpt: sticker 向量删除完成 (sticker_id={sticker_id})")
             except Exception as exc:
                 logger.debug(f"simple-gpt: sticker 向量删除失败: {exc}")
 
