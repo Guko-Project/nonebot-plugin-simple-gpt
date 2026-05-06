@@ -29,6 +29,7 @@ from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 
+from ...image_utils import detect_image_mime
 from ...plugin_config_inject import register_plugin_config_field
 from ...plugin_system import (
     LLMResponsePayload,
@@ -684,11 +685,9 @@ def _resolve_mime(
         guessed = mimetypes.guess_type(filename)[0]
         if guessed:
             return guessed
-    import imghdr
-
-    detected = imghdr.what(None, h=content)
+    detected = detect_image_mime(content)
     if detected:
-        return f"image/{detected}"
+        return detected
     return "image/png"
 
 

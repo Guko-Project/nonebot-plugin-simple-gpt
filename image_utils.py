@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import imghdr
 import io
 import mimetypes
 from pathlib import Path
@@ -169,10 +168,48 @@ def _resolve_mime(
         guessed = mimetypes.guess_type(filename)[0]
         if guessed:
             return guessed
-    detected = imghdr.what(None, h=content)
+    detected = detect_image_mime(content)
     if detected:
-        return f"image/{detected}"
+        return detected
     return "image/png"
+
+
+def detect_image_mime(content: bytes) -> Optional[str]:
+    """Detect image MIME type without deprecated stdlib imghdr.
+
+    Python 3.13 removed imghdr. Pillow is already a runtime dependency of this
+    plugin, so prefer Pillow's format detection and keep a tiny signature
+    fallback for environments where Pillow is unavailable.
+    """
+    if PIL_AVAILABLE:
+        try:
+            with Image.open(io.BytesIO(content)) as image:
+                if image.format:
+                    mime = Image.MIME.get(image.format.upper())
+                    if mime:
+                        return mime
+                    return f"image/{image.format.lower()}"
+        except Exception:  # noqa: BLE001
+            logger.debug("simple-gpt: Pillow 无法识别图片 MIME，尝试签名兜底")
+
+    return _detect_image_mime_by_signature(content)
+
+
+def _detect_image_mime_by_signature(content: bytes) -> Optional[str]:
+    """Small fallback for common image signatures."""
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return "image/webp"
+    if content.startswith(b"BM"):
+        return "image/bmp"
+    if content.startswith((b"II*\x00", b"MM\x00*")):
+        return "image/tiff"
+    return None
 
 
 async def compress_image(
@@ -270,4 +307,3 @@ def _compress_image_sync(
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"simple-gpt: 图片压缩失败：{exc}")
         return None
-
