@@ -350,7 +350,11 @@ class StickerPlugin(SimpleGPTPlugin):
         search_session_ids = _build_search_session_ids(session_id)
 
         semantic_query = query_text or " ".join(emotion_tags + intent_tags + scene_tags)
-        tag_query = " ".join(emotion_tags + intent_tags + scene_tags)
+        tag_query = _build_tag_embedding_text(
+            emotion_tags=emotion_tags,
+            intent_tags=intent_tags,
+            scene_tags=scene_tags,
+        )
         logger.debug(
             "simple-gpt: sticker 候选检索开始 "
             f"(session={session_id}, search_sessions={search_session_ids}, "
@@ -432,23 +436,26 @@ class StickerPlugin(SimpleGPTPlugin):
                 )
                 continue
             overlap = expanded_tags.intersection(expanded_sticker_tags)
-            tag_match_score = (
+            exact_tag_match_score = (
                 len(overlap) / max(len(expanded_tags), 1)
                 if expanded_tags
                 else 0.0
             )
             semantic_score = float(row.get("semantic_score", 0.0))
             tag_vector_score = float(row.get("tag_vector_score", 0.0))
+            tag_match_score = max(exact_tag_match_score, tag_vector_score)
             final_score = (
-                semantic_score * 0.5
-                + tag_vector_score * 0.3
+                semantic_score * 0.35
+                + tag_vector_score * 0.45
                 + tag_match_score * 0.2
             )
             row["final_score"] = final_score
             logger.debug(
                 "simple-gpt: sticker 候选评分 "
                 f"(sticker_id={row['id']}, semantic={semantic_score:.3f}, "
-                f"tag_vector={tag_vector_score:.3f}, tag_match={tag_match_score:.3f}, "
+                f"tag_vector={tag_vector_score:.3f}, "
+                f"exact_tag_match={exact_tag_match_score:.3f}, "
+                f"tag_match={tag_match_score:.3f}, "
                 f"final={final_score:.3f}, threshold={SEND_THRESHOLD})"
             )
             if final_score < SEND_THRESHOLD:
@@ -572,7 +579,7 @@ async def _handle_save_sticker(
     emotion_tags = _normalize_tags(sticker_meta.get("emotion_tags", []))
     intent_tags = _normalize_tags(sticker_meta.get("intent_tags", []))
     scene_tags = _normalize_tags(sticker_meta.get("scene_tags", []))
-    aliases = _normalize_tags(sticker_meta.get("aliases", []))
+    aliases = _normalize_aliases(sticker_meta.get("aliases", []))
     description = str(sticker_meta.get("description", "")).strip()
     ocr_text = str(sticker_meta.get("ocr_text", "")).strip()
     usage_notes = str(sticker_meta.get("usage_notes", "")).strip()
@@ -912,16 +919,24 @@ def _normalize_tags(tags: Sequence[str]) -> List[str]:
     return normalized[:8]
 
 
+def _normalize_aliases(aliases: Sequence[str]) -> List[str]:
+    normalized: List[str] = []
+    for alias in aliases:
+        stripped = str(alias).strip()
+        if stripped and stripped not in normalized:
+            normalized.append(stripped)
+    return normalized[:8]
+
+
 def _expand_tags(tags: Sequence[str]) -> List[str]:
     expanded: List[str] = []
     for tag in _normalize_tags(tags):
-        aliases = _TAG_SYNONYMS.get(tag, [tag])
-        for alias in aliases:
-            canonical = _SYNONYM_TO_CANONICAL.get(alias, alias)
-            if alias not in expanded:
-                expanded.append(alias)
-            if canonical not in expanded:
-                expanded.append(canonical)
+        terms = [tag, *_TAG_SYNONYMS.get(tag, [])]
+        for term in terms:
+            canonical = _SYNONYM_TO_CANONICAL.get(term, term)
+            for item in (term, canonical, *_TAG_SYNONYMS.get(canonical, [])):
+                if item not in expanded:
+                    expanded.append(item)
     return expanded
 
 
@@ -955,14 +970,31 @@ def _build_tag_text(
     usage_notes: str,
     aliases: Sequence[str],
 ) -> str:
+    expanded_tags = _build_tag_embedding_text(
+        emotion_tags=emotion_tags,
+        intent_tags=intent_tags,
+        scene_tags=scene_tags,
+    )
     parts = [
-        " ".join(emotion_tags),
-        " ".join(intent_tags),
-        " ".join(scene_tags),
+        expanded_tags,
         usage_notes,
         " ".join(aliases),
     ]
     return " ".join(part for part in parts if part).strip()
+
+
+def _build_tag_embedding_text(
+    *,
+    emotion_tags: Sequence[str],
+    intent_tags: Sequence[str],
+    scene_tags: Sequence[str],
+) -> str:
+    payload = {
+        "emotion": _expand_tags(emotion_tags),
+        "intent": _expand_tags(intent_tags),
+        "scene": _expand_tags(scene_tags),
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def get_admin_handles() -> Tuple[StickerStore | None, StickerVectorStore | None]:
