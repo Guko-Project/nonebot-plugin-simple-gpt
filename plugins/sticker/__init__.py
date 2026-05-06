@@ -107,6 +107,8 @@ register_plugin_config_field(
 IMAGE_DIR = "images"
 SAVE_COMMAND = "记忆表情"
 SAVE_COMMAND_ALIASES = {"memo_sticker"}
+GLOBAL_SESSION_ID = "global"
+GLOBAL_SAVE_ARGS = {"global", "全局", "通用", "公共"}
 SEND_PROBABILITY = 1
 SEMANTIC_TOP_K = 8
 TAG_TOP_K = 8
@@ -292,16 +294,19 @@ class StickerPlugin(SimpleGPTPlugin):
         assert self._vector_store is not None
         assert self._extractor is not None
 
-        sticker_count = await self._store.count_enabled(session_id)
+        search_session_ids = _build_search_session_ids(session_id)
+        sticker_count = await self._store.count_enabled_for_sessions(search_session_ids)
         if sticker_count <= 0:
             logger.debug(
                 "simple-gpt: sticker 跳过发送：当前会话无可用表情 "
-                f"(session={session_id}, enabled_count={sticker_count})"
+                f"(session={session_id}, search_sessions={search_session_ids}, "
+                f"enabled_count={sticker_count})"
             )
             return payload
         logger.debug(
             "simple-gpt: sticker 可用表情计数完成 "
-            f"(session={session_id}, enabled_count={sticker_count})"
+            f"(session={session_id}, search_sessions={search_session_ids}, "
+            f"enabled_count={sticker_count})"
         )
 
         decision = await self._extractor.decide_sticker(
@@ -342,12 +347,14 @@ class StickerPlugin(SimpleGPTPlugin):
         intent_tags = _normalize_tags(decision.get("intent_tags", []))
         scene_tags = _normalize_tags(decision.get("scene_tags", []))
         negative_tags = set(_expand_tags(decision.get("negative_tags", [])))
+        search_session_ids = _build_search_session_ids(session_id)
 
         semantic_query = query_text or " ".join(emotion_tags + intent_tags + scene_tags)
         tag_query = " ".join(emotion_tags + intent_tags + scene_tags)
         logger.debug(
             "simple-gpt: sticker 候选检索开始 "
-            f"(session={session_id}, semantic_query={semantic_query!r}, "
+            f"(session={session_id}, search_sessions={search_session_ids}, "
+            f"semantic_query={semantic_query!r}, "
             f"tag_query={tag_query!r}, emotion_tags={emotion_tags}, "
             f"intent_tags={intent_tags}, scene_tags={scene_tags}, "
             f"negative_tags={sorted(negative_tags)})"
@@ -364,6 +371,7 @@ class StickerPlugin(SimpleGPTPlugin):
         if semantic_vector:
             semantic_rows = await self._vector_store.search(
                 session_id=session_id,
+                session_ids=search_session_ids,
                 query_vector=semantic_vector,
                 vector_column="semantic_vector",
                 top_k=SEMANTIC_TOP_K,
@@ -371,6 +379,7 @@ class StickerPlugin(SimpleGPTPlugin):
         if tag_vector:
             tag_rows = await self._vector_store.search(
                 session_id=session_id,
+                session_ids=search_session_ids,
                 query_vector=tag_vector,
                 vector_column="tag_vector",
                 top_k=TAG_TOP_K,
@@ -495,10 +504,13 @@ async def _handle_save_sticker(
         logger.debug("simple-gpt: sticker 保存链路跳过：非群消息事件")
         await matcher.finish()
 
-    session_id = f"group_{event.group_id}"
+    raw_args = str(args).strip()
+    save_as_global = _is_global_save_arg(raw_args)
+    session_id = GLOBAL_SESSION_ID if save_as_global else f"group_{event.group_id}"
     logger.debug(
         "simple-gpt: sticker 保存链路开始 "
-        f"(session={session_id}, user={event.user_id}, args={str(args)!r})"
+        f"(session={session_id}, scope={'global' if save_as_global else 'group'}, "
+        f"group=group_{event.group_id}, user={event.user_id}, args={raw_args!r})"
     )
     reply_message = _extract_reply_message(event)
     if reply_message is None:
@@ -629,12 +641,29 @@ async def _handle_save_sticker(
         f"(session={session_id}, sticker_id={record['id']}, description={description!r})"
     )
     await matcher.finish(
-        "已记住这个表情。\n"
+        f"已记住这个{'全局' if save_as_global else '群'}表情。\n"
         f"描述：{description}\n"
         f"情绪：{'、'.join(emotion_tags) or '未识别'}\n"
         f"意图：{'、'.join(intent_tags) or '未识别'}\n"
         f"场景：{'、'.join(scene_tags) or '未识别'}"
     )
+
+
+def _build_search_session_ids(session_id: str) -> List[str]:
+    """Search current session stickers plus globally shared stickers."""
+
+    if session_id == GLOBAL_SESSION_ID:
+        return [GLOBAL_SESSION_ID]
+    return [session_id, GLOBAL_SESSION_ID]
+
+
+def _is_global_save_arg(raw_args: str) -> bool:
+    tokens = {
+        token.strip().lower()
+        for token in raw_args.replace("，", " ").replace(",", " ").split()
+        if token.strip()
+    }
+    return bool(tokens.intersection(GLOBAL_SAVE_ARGS))
 
 
 def _extract_reply_message(event: MessageEvent) -> Optional[Message]:

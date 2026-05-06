@@ -5,7 +5,7 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from nonebot.log import logger
 
@@ -184,6 +184,32 @@ class StickerStore:
             logger.debug(
                 "simple-gpt: sticker 可用数量查询完成 "
                 f"(session={session_id}, count={count})"
+            )
+            return count
+
+        return await asyncio.to_thread(_do)
+
+    async def count_enabled_for_sessions(self, session_ids: Sequence[str]) -> int:
+        def _do() -> int:
+            unique_session_ids = list(dict.fromkeys(session_ids))
+            if not unique_session_ids:
+                logger.debug("simple-gpt: sticker 多会话可用数量查询跳过：session_ids 为空")
+                return 0
+
+            conn = self._ensure_connection()
+            placeholders = ",".join("?" for _ in unique_session_ids)
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM stickers
+                WHERE session_id IN ({placeholders}) AND enabled = 1
+                """,
+                unique_session_ids,
+            ).fetchone()
+            count = int(row[0]) if row else 0
+            logger.debug(
+                "simple-gpt: sticker 多会话可用数量查询完成 "
+                f"(sessions={unique_session_ids}, count={count})"
             )
             return count
 

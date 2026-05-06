@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Sequence
 
 import pyarrow as pa
 from nonebot.log import logger
@@ -112,21 +112,28 @@ class StickerVectorStore:
         self,
         *,
         session_id: str,
+        session_ids: Sequence[str] | None = None,
         query_vector: List[float],
         vector_column: str,
         top_k: int,
     ) -> List[Dict[str, Any]]:
         def _do() -> List[Dict[str, Any]]:
             table = self._ensure_connection()
+            search_session_ids = list(dict.fromkeys(session_ids or [session_id]))
+            if not search_session_ids:
+                logger.debug("simple-gpt: sticker 向量搜索跳过：session_ids 为空")
+                return []
+            session_filter = _build_session_filter(search_session_ids)
             try:
                 logger.debug(
                     "simple-gpt: sticker 向量搜索开始 "
-                    f"(session={session_id}, vector_column={vector_column}, "
+                    f"(session={session_id}, search_sessions={search_session_ids}, "
+                    f"vector_column={vector_column}, "
                     f"query_dim={len(query_vector)}, top_k={top_k})"
                 )
                 results = (
                     table.search(query_vector, vector_column_name=vector_column)
-                    .where(f"session_id = '{session_id}'")
+                    .where(session_filter)
                     .metric("cosine")
                     .limit(top_k)
                     .to_pandas()
@@ -154,7 +161,8 @@ class StickerVectorStore:
                 )
             logger.debug(
                 "simple-gpt: sticker 向量搜索完成 "
-                f"(session={session_id}, vector_column={vector_column}, rows={len(rows)}, "
+                f"(session={session_id}, search_sessions={search_session_ids}, "
+                f"vector_column={vector_column}, rows={len(rows)}, "
                 f"ids={[row['id'] for row in rows]})"
             )
             return rows
@@ -172,3 +180,13 @@ class StickerVectorStore:
                 logger.debug(f"simple-gpt: sticker 向量删除失败: {exc}")
 
         await asyncio.to_thread(_do)
+
+
+def _quote_sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _build_session_filter(session_ids: Sequence[str]) -> str:
+    if len(session_ids) == 1:
+        return f"session_id = {_quote_sql_literal(session_ids[0])}"
+    return "session_id IN (" + ", ".join(_quote_sql_literal(item) for item in session_ids) + ")"
