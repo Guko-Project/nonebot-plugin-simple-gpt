@@ -325,11 +325,19 @@ class StickerPlugin(SimpleGPTPlugin):
             return payload
 
         sticker_id = candidate["id"]
+        sticker_path = Path(candidate["file_path"]).expanduser().resolve()
+        if not sticker_path.is_file():
+            logger.warning(
+                "simple-gpt: sticker 命中但图片文件不存在，跳过发送 "
+                f"(session={session_id}, sticker_id={sticker_id}, file_path={sticker_path})"
+            )
+            return payload
         now = asyncio.get_running_loop().time()
         self._recent_sent[session_id].append((sticker_id, now))
-        payload.post_messages.append(
-            MessageSegment.image(Path(candidate["file_path"]).resolve().as_uri())
-        )
+        image_segment = await _build_sticker_image_segment(sticker_path)
+        if image_segment is None:
+            return payload
+        payload.post_messages.append(image_segment)
         logger.info(
             "simple-gpt: sticker 命中 "
             f"(session={session_id}, sticker_id={sticker_id}, score={candidate['final_score']:.3f})"
@@ -415,6 +423,13 @@ class StickerPlugin(SimpleGPTPlugin):
 
         best_candidate: Optional[Dict[str, Any]] = None
         for row in list(merged.values())[:MAX_CANDIDATES]:
+            file_path = Path(str(row.get("file_path", ""))).expanduser().resolve()
+            if not file_path.is_file():
+                logger.warning(
+                    "simple-gpt: sticker 候选跳过：图片文件不存在 "
+                    f"(sticker_id={row.get('id')}, file_path={file_path})"
+                )
+                continue
             if row["id"] in recent_block:
                 logger.debug(
                     "simple-gpt: sticker 候选跳过：冷却中 "
@@ -862,6 +877,30 @@ async def _save_sticker_file(image_bytes: bytes, ext: str) -> str:
     await asyncio.to_thread(file_path.write_bytes, image_bytes)
     logger.debug(f"simple-gpt: sticker 写入图片文件 (file_path={file_path}, bytes={len(image_bytes)})")
     return str(file_path)
+
+
+async def _build_sticker_image_segment(file_path: Path) -> Optional[MessageSegment]:
+    """读取 sticker 文件并构造 base64 图片段，避免依赖 OneBot 实现访问 bot 本地路径。"""
+
+    try:
+        image_bytes = await asyncio.to_thread(file_path.read_bytes)
+    except Exception as exc:
+        logger.warning(
+            "simple-gpt: sticker 图片读取失败，跳过发送 "
+            f"(file_path={file_path}, error={exc})"
+        )
+        return None
+    if not image_bytes:
+        logger.warning(f"simple-gpt: sticker 图片为空，跳过发送 (file_path={file_path})")
+        return None
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        logger.warning(
+            "simple-gpt: sticker 图片过大，跳过发送 "
+            f"(file_path={file_path}, bytes={len(image_bytes)})"
+        )
+        return None
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return MessageSegment.image(f"base64://{encoded}")
 
 
 def _decode_data_url(data_url: str) -> Tuple[bytes, str]:

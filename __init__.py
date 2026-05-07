@@ -8,6 +8,7 @@ from typing import Deque, Dict, List, Optional, Sequence
 from nonebot import get_driver, get_plugin_config, on_message
 from nonebot.adapters import Bot
 from nonebot.adapters.onebot.v11 import (
+    ActionFailed,
     GroupMessageEvent,
     MessageEvent,
     MessageSegment,
@@ -293,7 +294,13 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
                     await matcher.send(message)
                 for post_message in post_messages:
                     await asyncio.sleep(random.uniform(0.8, 2.0))
-                    await matcher.send(post_message)
+                    try:
+                        await matcher.send(post_message)
+                    except ActionFailed as exc:
+                        logger.warning(
+                            "simple-gpt: 发送插件附加消息失败，已跳过 "
+                            f"(message={post_message!r}, error={exc})"
+                        )
 
     history_manager.append(
         session_id,
