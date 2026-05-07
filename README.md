@@ -33,6 +33,7 @@
 | `SIMPLE_GPT_REPLY_PROBABILITY` | 否 | `0.03` | 随机触发概率，设为 `0` 表示只在艾特时回复 |
 | `SIMPLE_GPT_FAILURE_REPLY` | 否 | `呜呜，暂时无法连接到大模型，请稍后再试呀。` | 调用失败时的兜底文本 |
 | `SIMPLE_GPT_PROACTIVE_GROUP_WHITELIST` | 否 | 空 | 允许主动发言（随机插话）的群聊 ID，使用逗号分隔，例如 `123456,789012` |
+| `SIMPLE_GPT_DISABLE_IMAGE_INPUT` | 否 | `false` | 完全禁用图片输入；开启后不解析、不上传图片，也不在 prompt/history 中保留图片提示 |
 
 默认 Prompt 模板：
 
@@ -47,6 +48,7 @@
 - 在群聊中艾特机器人即可触发智能回复，回复内容会基于最近 30 条群聊消息生成。
 - 当 `SIMPLE_GPT_REPLY_PROBABILITY` 大于 0 时，机器人也可能在未被艾特的状态下随机插话；仅当当前群聊 ID 位于 `SIMPLE_GPT_PROACTIVE_GROUP_WHITELIST` 中时才会开启此行为。
 - 如果未配置 `SIMPLE_GPT_API_KEY`，仅在被艾特时会返回兜底提示；随机回复会自动关闭。
+- 如果当前模型或兼容接口不支持多模态，可设置 `SIMPLE_GPT_DISABLE_IMAGE_INPUT=true`，此时图片消息会按纯文本消息处理。
 
 ## 🛠️ 开发提示
 

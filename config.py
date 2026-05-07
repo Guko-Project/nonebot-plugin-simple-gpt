@@ -59,6 +59,10 @@ class Config(BaseModel):
         default=False,
         description="Prompt 调试模式，启用后不调用 AI 而是直接返回构造的 prompt",
     )
+    simple_gpt_disable_image_input: bool = Field(
+        default=False,
+        description="是否完全禁用图片输入，启用后不解析、不上传图片，也不在 prompt 中保留图片提示",
+    )
     simple_gpt_image_compression_enabled: bool = Field(
         default=True,
         description="是否启用图片压缩",

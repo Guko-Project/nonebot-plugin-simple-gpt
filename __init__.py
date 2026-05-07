@@ -140,6 +140,21 @@ def _append_image_hint(content: str, count: int) -> str:
     return f"{content}\n（附带 {count} 张图片）"
 
 
+def _clear_history_images(history: Sequence[HistoryEntry]) -> List[HistoryEntry]:
+    """返回移除图片上下文后的历史记录副本。"""
+
+    return [
+        HistoryEntry(
+            speaker=entry.speaker,
+            content=entry.content,
+            is_bot=entry.is_bot,
+            images=[],
+            user_id=entry.user_id,
+        )
+        for entry in history
+    ]
+
+
 def should_reply(event: MessageEvent) -> bool:
     if event.is_tome():
         return True
@@ -178,12 +193,20 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
     else:
         plain_text = raw_text
 
-    image_contexts = await extract_image_data_urls(event.message)
+    if plugin_config.simple_gpt_disable_image_input:
+        image_contexts: List[str] = []
+    else:
+        image_contexts = await extract_image_data_urls(event.message)
 
     session_id = f"group_{event.group_id}"
     display_name = event.sender.card or event.sender.nickname or f"用户{user_id}"
 
     history_before = history_manager.snapshot(session_id)
+    llm_history = (
+        _clear_history_images(history_before)
+        if plugin_config.simple_gpt_disable_image_input
+        else history_before
+    )
     is_tome_event = event.is_tome()
     reply_needed = should_reply(event)
     if (
@@ -202,25 +225,30 @@ async def _(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
 
     if reply_needed:
         prompt = generate_prompt(
-            history=history_before,
+            history=llm_history,
             sender=f"{display_name}({user_id})",
             latest_message=plain_text,
             latest_images=image_contexts,
             is_proactive=not is_tome_event,
         )
-        history_images: List[str] = [
-            image for entry in history_before for image in entry.images
-        ]
-        combined_images = [*history_images, *image_contexts]
+        if plugin_config.simple_gpt_disable_image_input:
+            llm_images: List[str] = []
+        else:
+            history_images: List[str] = [
+                image for entry in history_before for image in entry.images
+            ]
+            llm_images = [*history_images, *image_contexts]
         llm_request = LLMRequestPayload(
             prompt=prompt,
-            history=history_before,
+            history=llm_history,
             sender=display_name,
             latest_message=plain_text,
-            images=combined_images,
+            images=llm_images,
             extra={"session_id": session_id, "sender_user_id": user_id, "is_proactive": not is_tome_event},
         )
         llm_request = await emit_before_llm_request(llm_request)
+        if plugin_config.simple_gpt_disable_image_input:
+            llm_request.images = []
         if llm_request.extra.get("skip_llm"):
             logger.info("simple-gpt: 插件判断无需回复，跳过主动发言")
             reply_needed = False
