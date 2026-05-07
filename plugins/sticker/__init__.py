@@ -115,7 +115,7 @@ SEND_PROBABILITY = 0.4
 SEMANTIC_TOP_K = 8
 TAG_TOP_K = 8
 MAX_CANDIDATES = 10
-SEND_THRESHOLD = 0.56
+SEND_THRESHOLD = 0.6
 COOLDOWN_SECONDS = 90
 RECENT_STICKER_WINDOW = 5
 IMAGE_FETCH_TIMEOUT = 30.0
@@ -989,7 +989,7 @@ async def _save_sticker_file(image_bytes: bytes, ext: str) -> str:
 
 
 async def _build_sticker_image_segment(file_path: Path) -> Optional[MessageSegment]:
-    """读取 sticker 文件并构造 base64 图片段，避免依赖 OneBot 实现访问 bot 本地路径。"""
+    """读取 sticker 文件并构造带 subType 的 base64 图片段。"""
 
     try:
         image_bytes = await asyncio.to_thread(file_path.read_bytes)
@@ -1008,8 +1008,14 @@ async def _build_sticker_image_segment(file_path: Path) -> Optional[MessageSegme
             f"(file_path={file_path}, bytes={len(image_bytes)})"
         )
         return None
-    encoded = base64.b64encode(image_bytes).decode("ascii")
-    return MessageSegment.image(f"base64://{encoded}")
+    file = f"base64://{base64.b64encode(image_bytes).decode('ascii')}"
+    return MessageSegment(
+        type="image",
+        data={
+            "file": file,
+            "subType": 1,
+        },
+    )
 
 
 def _decode_data_url(data_url: str) -> Tuple[bytes, str]:
