@@ -421,7 +421,7 @@ class StickerPlugin(SimpleGPTPlugin):
             f"(recent_count={len(recent_sent_ids)}, blocked={list(recent_block)})"
         )
 
-        best_candidate: Optional[Dict[str, Any]] = None
+        eligible_candidates: List[Dict[str, Any]] = []
         for row in list(merged.values())[:MAX_CANDIDATES]:
             file_path = Path(str(row.get("file_path", ""))).expanduser().resolve()
             if not file_path.is_file():
@@ -475,16 +475,24 @@ class StickerPlugin(SimpleGPTPlugin):
             )
             if final_score < SEND_THRESHOLD:
                 continue
-            if best_candidate is None or final_score > best_candidate["final_score"]:
-                best_candidate = row
+            eligible_candidates.append(row)
 
-        if best_candidate is not None:
+        if not eligible_candidates:
+            return None
+
+        selected_candidate = random.choice(eligible_candidates)
+        logger.debug(
+            "simple-gpt: sticker 随机候选池 "
+            f"(count={len(eligible_candidates)}, "
+            f"ids={[row['id'] for row in eligible_candidates]})"
+        )
+        if selected_candidate is not None:
             logger.debug(
-                "simple-gpt: sticker 最佳候选 "
-                f"(sticker_id={best_candidate['id']}, "
-                f"final_score={best_candidate['final_score']:.3f})"
+                "simple-gpt: sticker 随机选中候选 "
+                f"(sticker_id={selected_candidate['id']}, "
+                f"final_score={selected_candidate['final_score']:.3f})"
             )
-        return best_candidate
+        return selected_candidate
 
     def close(self) -> None:
         if self._store is not None:
