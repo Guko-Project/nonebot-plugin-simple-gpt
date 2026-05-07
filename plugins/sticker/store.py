@@ -96,6 +96,42 @@ class StickerStore:
 
         return await asyncio.to_thread(_do)
 
+    async def find_by_hash(
+        self, session_id: str, sha256: str, phash: str
+    ) -> Optional[Dict[str, Any]]:
+        def _do() -> Optional[Dict[str, Any]]:
+            conn = self._ensure_connection()
+            row = conn.execute(
+                """
+                SELECT id, file_path, sha256, phash, description
+                FROM stickers
+                WHERE session_id = ?
+                  AND (sha256 = ? OR phash = ?)
+                LIMIT 1
+                """,
+                (session_id, sha256, phash),
+            ).fetchone()
+            if row is None:
+                logger.debug(
+                    "simple-gpt: sticker 按哈希查询未命中 "
+                    f"(session={session_id}, sha256={sha256[:12]}..., phash={phash})"
+                )
+                return None
+            logger.debug(
+                "simple-gpt: sticker 按哈希查询命中 "
+                f"(session={session_id}, sticker_id={row[0]}, sha256={row[2][:12]}..., "
+                f"phash={row[3]})"
+            )
+            return {
+                "id": row[0],
+                "file_path": row[1],
+                "sha256": row[2],
+                "phash": row[3],
+                "description": row[4],
+            }
+
+        return await asyncio.to_thread(_do)
+
     async def add(
         self,
         *,

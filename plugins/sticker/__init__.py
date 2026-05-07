@@ -107,6 +107,8 @@ register_plugin_config_field(
 IMAGE_DIR = "images"
 SAVE_COMMAND = "记忆表情"
 SAVE_COMMAND_ALIASES = {"memo_sticker"}
+DELETE_COMMAND = "删除记忆表情"
+DELETE_COMMAND_ALIASES = {"delete_sticker", "删除表情记忆"}
 GLOBAL_SESSION_ID = "global"
 GLOBAL_SAVE_ARGS = {"global", "全局", "通用", "公共"}
 SEND_PROBABILITY = 0.4
@@ -517,6 +519,13 @@ _save_sticker_matcher = on_command(
     block=True,
 )
 
+_delete_sticker_matcher = on_command(
+    DELETE_COMMAND,
+    aliases=DELETE_COMMAND_ALIASES,
+    priority=1,
+    block=True,
+)
+
 
 @_save_sticker_matcher.handle()
 async def _handle_save_sticker(
@@ -676,6 +685,98 @@ async def _handle_save_sticker(
         f"情绪：{'、'.join(emotion_tags) or '未识别'}\n"
         f"意图：{'、'.join(intent_tags) or '未识别'}\n"
         f"场景：{'、'.join(scene_tags) or '未识别'}"
+    )
+
+
+@_delete_sticker_matcher.handle()
+async def _handle_delete_sticker(
+    matcher: Matcher,
+    bot: Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+) -> None:
+    _plugin_instance._ensure_initialized()
+    assert _plugin_instance._store is not None
+    assert _plugin_instance._vector_store is not None
+
+    if not isinstance(event, GroupMessageEvent):
+        logger.debug("simple-gpt: sticker 删除链路跳过：非群消息事件")
+        await matcher.finish()
+
+    raw_args = str(args).strip()
+    delete_global = _is_global_save_arg(raw_args)
+    session_id = GLOBAL_SESSION_ID if delete_global else f"group_{event.group_id}"
+    logger.debug(
+        "simple-gpt: sticker 删除链路开始 "
+        f"(session={session_id}, scope={'global' if delete_global else 'group'}, "
+        f"group=group_{event.group_id}, user={event.user_id}, args={raw_args!r})"
+    )
+
+    reply_message = _extract_reply_message(event)
+    if reply_message is None:
+        logger.debug("simple-gpt: sticker 删除失败：没有回复消息")
+        await matcher.finish(
+            f"请回复一张已记住的表情图后再发送“{DELETE_COMMAND}”"
+            f"或“{next(iter(DELETE_COMMAND_ALIASES))}”。"
+        )
+
+    try:
+        data_urls = await _extract_image_data_urls_from_message(
+            reply_message,
+            bot=bot,
+            timeout=min(max(_get_plugin_config().simple_gpt_timeout, 15.0), 120.0),
+        )
+    except Exception as exc:
+        logger.warning(f"simple-gpt: sticker 删除解析回复图片失败: {exc}")
+        await matcher.finish("回复里的图片解析失败，稍后再试。")
+
+    if not data_urls:
+        logger.debug("simple-gpt: sticker 删除失败：回复消息无图片")
+        await matcher.finish("被回复消息里没有可识别的图片。")
+
+    image_bytes, _ = _decode_data_url(data_urls[0])
+    if not image_bytes:
+        logger.debug("simple-gpt: sticker 删除失败：data URL 解码为空")
+        await matcher.finish("图片解析失败，暂时无法删除。")
+
+    sha256 = hashlib.sha256(image_bytes).hexdigest()
+    phash = _compute_perceptual_hash(image_bytes)
+    target = await _plugin_instance._store.find_by_hash(session_id, sha256, phash)
+    if target is None:
+        logger.debug(
+            "simple-gpt: sticker 删除失败：未找到匹配表情 "
+            f"(session={session_id}, sha256={sha256[:12]}..., phash={phash})"
+        )
+        await matcher.finish(f"没有找到匹配的{'全局' if delete_global else '群'}表情。")
+
+    deleted = await _plugin_instance._store.delete_sticker(target["id"])
+    if deleted is None:
+        logger.debug(
+            "simple-gpt: sticker 删除失败：元数据删除未命中 "
+            f"(sticker_id={target['id']})"
+        )
+        await matcher.finish("这个表情已经不存在了。")
+
+    await _plugin_instance._vector_store.delete(target["id"])
+    file_path = Path(deleted["file_path"])
+    if file_path.exists():
+        try:
+            await asyncio.to_thread(file_path.unlink)
+            logger.debug(f"simple-gpt: sticker 图片文件已删除 (file_path={file_path})")
+        except Exception as exc:
+            logger.warning(
+                "simple-gpt: sticker 图片文件删除失败 "
+                f"(file_path={file_path}, error={exc})"
+            )
+
+    description = target.get("description") or target["id"]
+    logger.info(
+        "simple-gpt: 已删除表情 "
+        f"(session={session_id}, sticker_id={target['id']}, description={description!r})"
+    )
+    await matcher.finish(
+        f"已删除这个{'全局' if delete_global else '群'}表情。\n"
+        f"描述：{description}"
     )
 
 
