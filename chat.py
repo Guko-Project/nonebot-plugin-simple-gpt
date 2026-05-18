@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nonebot.log import logger
 from openai import AsyncOpenAI, OpenAIError
+from .utils.deepseek_marker import INNER_OS_MARKER, NO_INNER_OS_MARKER
 
 _client_lock = asyncio.Lock()
 _request_lock = asyncio.Lock()
@@ -114,6 +115,10 @@ async def generate_chat_reply(
     else:
         user_message_content = content_parts
 
+    # DeepSeek 角色扮演模式
+    if "deepseek" in model:
+        user_message_content = user_message_content + NO_INNER_OS_MARKER
+
     last_error: Optional[Exception] = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -122,6 +127,8 @@ async def generate_chat_reply(
                     model=model,
                     messages=[{"role": "user", "content": user_message_content}],
                     temperature=temperature,
+                    reasoning_effort="xhigh",
+                    extra_body={"thinking": {"type": "enabled"}},
                     # 暂时不添加最大 token 数量
                     # max_tokens=max_tokens,
                 )
